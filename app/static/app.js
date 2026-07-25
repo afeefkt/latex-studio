@@ -2,7 +2,7 @@
 import { EditorView, basicSetup } from "https://esm.sh/codemirror@6.0.1";
 import { EditorState }            from "https://esm.sh/@codemirror/state@^6.0.0?target=es2022";
 import { keymap }                 from "https://esm.sh/@codemirror/view@^6.0.0?target=es2022";
-import { defaultKeymap, indentWithTab } from "https://esm.sh/@codemirror/commands@^6.0.0?target=es2022";
+import { defaultKeymap, indentWithTab, undo, redo } from "https://esm.sh/@codemirror/commands@^6.0.0?target=es2022";
 import { oneDark }                from "https://esm.sh/@codemirror/theme-one-dark@^6.0.0?target=es2022";
 import { StreamLanguage }         from "https://esm.sh/@codemirror/language@^6.0.0?target=es2022";
 import { stex }                   from "https://esm.sh/@codemirror/legacy-modes/mode/stex?target=es2022";
@@ -111,6 +111,17 @@ function setEditorContent(text) {
 
 cmView = createEditor("");
 $("editor-container").style.height = "100%";
+
+// ── Undo/Redo buttons ─────────────────────────────────────────────────────────
+
+$("btn-undo").addEventListener("click", () => {
+  if (cmView) undo(cmView);
+  cmView?.focus();
+});
+$("btn-redo").addEventListener("click", () => {
+  if (cmView) redo(cmView);
+  cmView?.focus();
+});
 
 // ── Sidebar: Document list ───────────────────────────────────────────────────
 
@@ -704,7 +715,7 @@ chatInput.addEventListener("keydown", (e) => {
 async function sendChatMessage() {
   if (isStreaming) return stopStreaming();
   const text = chatInput.value.trim();
-  if (!text) return;
+  if (!text || !currentDoc) return;
 
   chatInput.value = "";
   chatInput.style.height = "auto";
@@ -713,29 +724,40 @@ async function sendChatMessage() {
   appendChatBubble("user", text);
 
   const assistantBubble = appendChatBubble("assistant", "", true);
-  let fullText = "";
+  const statusLine = document.createElement("div");
+  statusLine.className = "chat-status-line";
+  statusLine.textContent = "Asking LLM...";
+  assistantBubble.appendChild(statusLine);
 
   chatAbortController = new AbortController();
   isStreaming = true;
   btnChatSend.textContent = "Stop";
   btnChatSend.style.background = "var(--error)";
 
+  let fullText = "";
+  let patchedText = "";
+  let finalDiff = "";
+  let finalWarnings = [];
+  let success = false;
+  let iterations = 0;
+  let currentStep = "";
+
   try {
-    const resp = await fetch("/api/chat/stream", {
+    const resp = await fetch("/api/chat/apply-and-fix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: chatHistory,
+        doc_path: currentDoc.path,
+        file: currentFile,
+        prompt: text,
         provider: chatProvider.value || null,
         model: chatModel.value || null,
-        doc_content: currentDoc ? getEditorContent() : null,
       }),
       signal: chatAbortController.signal,
     });
 
     if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`HTTP ${resp.status}: ${errText}`);
+      throw new Error(`HTTP ${resp.status}`);
     }
 
     const reader = resp.body.getReader();
@@ -752,7 +774,6 @@ async function sendChatMessage() {
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        // Parse SSE event type
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
           continue;
@@ -763,19 +784,46 @@ async function sendChatMessage() {
             const data = JSON.parse(line.slice(6));
 
             if (currentEvent === "error") {
-              assistantBubble.textContent = `Error: ${data.error}`;
-              assistantBubble.style.color = "var(--error)";
+              statusLine.textContent = `Error: ${data.error}`;
+              statusLine.style.color = "var(--error)";
               return;
             }
 
+            if (currentEvent === "status") {
+              currentStep = data.step;
+              statusLine.textContent = data.message || "";
+              if (data.step === "compiling") {
+                statusLine.innerHTML = `<span class="spinner"></span> ${data.message}`;
+              }
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+              continue;
+            }
+
+            if (currentEvent === "compile") {
+              const errors = data.errors || [];
+              if (errors.length > 0) {
+                const errList = errors.map(e => `L${e.line || "?"}: ${e.message}`).join("<br>");
+                statusLine.innerHTML = `<span style="color:var(--error);font-size:11px">✗ Compile errors (attempt ${data.iteration}):<br>${errList}</span>`;
+              } else {
+                statusLine.innerHTML = `<span style="color:var(--ok)">✓ Compiled clean</span>`;
+              }
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+              continue;
+            }
+
             if (currentEvent === "done") {
-              if (data.full_text) fullText = data.full_text;
+              success = data.success;
+              iterations = data.iterations;
+              patchedText = data.patched || "";
+              finalDiff = data.diff || "";
+              finalWarnings = data.warnings || [];
               break;
             }
 
             if (data.token) {
               fullText += data.token;
-              assistantBubble.textContent = fullText;
+              // Store in hidden content, keep status visible
+              assistantBubble.setAttribute("data-content", fullText);
               chatMessages.scrollTop = chatMessages.scrollHeight;
             }
           } catch (_) {}
@@ -783,24 +831,28 @@ async function sendChatMessage() {
       }
     }
 
-    if (fullText) {
+    if (success) {
       chatHistory.push({ role: "assistant", content: fullText });
-      checkForDiff(assistantBubble, fullText);
-    } else if (!assistantBubble.textContent) {
-      assistantBubble.textContent = "(no response)";
+      statusLine.innerHTML = `<span style="color:var(--ok)">✓ Done${iterations > 1 ? ` (fixed in ${iterations} attempts)` : ""}</span>`;
+      setEditorContent(patchedText);
+      triggerCompile();
+      if (finalWarnings.length > 0) {
+        showErrors(finalWarnings);
+      }
+    } else if (patchedText) {
+      statusLine.innerHTML = `<span style="color:var(--error)">✗ Could not fix after ${iterations} attempts. Last attempt applied.</span>`;
+      setEditorContent(patchedText);
+      triggerCompile();
+    } else {
+      statusLine.textContent = "Error: No response from LLM.";
+      statusLine.style.color = "var(--error)";
     }
   } catch (e) {
-    if (e.name === "AbortError") {
-      if (fullText) {
-        assistantBubble.textContent = fullText + "\n\n[Stopped]";
-        chatHistory.push({ role: "assistant", content: fullText });
-        checkForDiff(assistantBubble, fullText);
-      } else {
-        assistantBubble.textContent = "[Cancelled]";
-      }
+    if (e.name !== "AbortError") {
+      statusLine.textContent = `Error: ${e.message || "Request failed"}`;
+      statusLine.style.color = "var(--error)";
     } else {
-      assistantBubble.textContent = `Error: ${e.message || "Could not reach LLM. Check your API key and network."}`;
-      assistantBubble.style.color = "var(--error)";
+      statusLine.textContent = "[Cancelled]";
     }
   } finally {
     isStreaming = false;
@@ -839,103 +891,6 @@ function appendChatBubble(role, content, isStreamingBubble) {
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
   return div;
-}
-
-// ── Chat: Diff detection and Accept/Reject ────────────────────────────────────
-
-function checkForDiff(bubble, text) {
-  const texMatch = text.match(/```tex\s*([\s\S]*?)```/);
-  if (!texMatch) return;
-
-  const proposed = texMatch[1].trim();
-  const original = currentDoc ? getEditorContent() : "";
-
-  if (!original || !currentDoc) return;
-
-  fetch("/api/chat/diff", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ original, proposed }),
-  })
-    .then(r => r.json())
-    .then(data => {
-      if (!data.has_changes) return;
-      appendDiffBlock(bubble, data.diff, data.patched);
-    })
-    .catch(() => {});
-}
-
-function appendDiffBlock(bubble, diffText, patchedText) {
-  const container = document.createElement("div");
-  container.className = "diff-block";
-
-  const header = document.createElement("div");
-  header.className = "diff-header";
-  header.innerHTML = '<span>Suggested edit</span>';
-
-  const actions = document.createElement("div");
-  actions.className = "diff-actions";
-
-  const acceptBtn = document.createElement("button");
-  acceptBtn.className = "btn-diff-accept";
-  acceptBtn.textContent = "Accept";
-  acceptBtn.addEventListener("click", async () => {
-    if (!currentDoc) return;
-    acceptBtn.disabled = true;
-    rejectBtn.disabled = true;
-    acceptBtn.textContent = "Applying…";
-    setEditorContent(patchedText);
-    try {
-      await fetch("/api/chat/accept", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: patchedText, doc_path: currentDoc.path, file: currentFile }),
-      });
-    } catch (_) {}
-    acceptBtn.textContent = "✓ Applied";
-    container.style.opacity = "0.6";
-    await triggerCompile();
-  });
-
-  const rejectBtn = document.createElement("button");
-  rejectBtn.className = "btn-diff-reject";
-  rejectBtn.textContent = "Reject";
-  rejectBtn.addEventListener("click", () => {
-    acceptBtn.disabled = true;
-    rejectBtn.disabled = true;
-    rejectBtn.textContent = "✗ Rejected";
-    container.style.opacity = "0.4";
-  });
-
-  actions.appendChild(acceptBtn);
-  actions.appendChild(rejectBtn);
-  header.appendChild(actions);
-  container.appendChild(header);
-
-  const content = document.createElement("div");
-  content.className = "diff-content";
-  content.innerHTML = colorizeDiff(diffText);
-  container.appendChild(content);
-
-  bubble.appendChild(container);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function colorizeDiff(diffText) {
-  return diffText.split("\n").map(line => {
-    let cls = "diff-context";
-    if (line.startsWith("+++") || line.startsWith("---")) cls = "diff-hdr";
-    else if (line.startsWith("@@")) cls = "diff-hdr";
-    else if (line.startsWith("+")) cls = "diff-add";
-    else if (line.startsWith("-")) cls = "diff-del";
-    return `<span class="${cls}">${escapeHTML(line)}</span>`;
-  }).join("\n");
-}
-
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
 }
 
 // ── Chat: Auto-resize input ────────────────────────────────────────────────────

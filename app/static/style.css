@@ -91,6 +91,12 @@ button:hover, .btn-link:hover { background: var(--border); }
 }
 #btn-compile:hover { filter: brightness(1.1); }
 
+#btn-undo, #btn-redo {
+  padding: 4px 8px;
+  min-width: 28px;
+  text-align: center;
+}
+
 /* ── Status badge ─────────────────────────────────────────────────────────── */
 .badge {
   font-size: 11px;
@@ -749,6 +755,30 @@ kbd {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
+}
+
+.chat-status-line {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  padding: 4px 0;
+  line-height: 1.6;
+}
+
+.spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--text-dim);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ── Scrollbar styling ───────────────────────────────────────────────────── */
