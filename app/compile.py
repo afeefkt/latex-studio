@@ -1,3 +1,5 @@
+"""LaTeX compilation + git auto-commit."""
+
 import asyncio
 import os
 import re
@@ -9,7 +11,6 @@ from pathlib import Path
 WORKSPACE = Path(__file__).parent.parent / "workspace"
 
 # MiKTeX installs to a user-local path that isn't always on PATH.
-# Add it so latexmk is findable even when the server started before PATH was set.
 _MIKTEX_CANDIDATES = [
     Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "MiKTeX" / "miktex" / "bin" / "x64",
     Path(os.environ.get("LOCALAPPDATA", "")) / "MiKTeX" / "miktex" / "bin" / "x64",
@@ -26,7 +27,7 @@ class CompileError:
     file: str
     line: int | None
     message: str
-    kind: str = "error"  # "error" | "warning"
+    kind: str = "error"
 
 
 @dataclass
@@ -36,33 +37,26 @@ class CompileResult:
     errors: list[CompileError] = field(default_factory=list)
     warnings: list[CompileError] = field(default_factory=list)
     log: str = ""
+    git_committed: bool = False
 
 
 def _parse_log(log_text: str) -> tuple[list[CompileError], list[CompileError]]:
     errors: list[CompileError] = []
     warnings: list[CompileError] = []
 
-    # Match lines like: ./main.tex:45: Undefined control sequence.
     error_re = re.compile(
         r"^(?P<file>[^\n:]+\.tex):(?P<line>\d+): (?P<msg>.+)$", re.MULTILINE
     )
-    # Match ! LaTeX Error: File 'foo.sty' not found. — with optional line prefix
     latex_error_re = re.compile(
         r"^! LaTeX Error: (?P<msg>.+?)(?:\.|$)", re.MULTILINE
     )
-    # Match any ! <error-type> line
     bang_error_re = re.compile(
         r"^!(?: (?:Undefined control sequence|Emergency stop|I can't find file|Missing (?:\\begin|\\end|number|insert|\\right|\\left)|Extra|Paragraph ended|Display math|Infinite glue|Runaway|File not found|No pages|There's no line here|Illegal|Argument of|Too many|Capacity exceeded).*)$", re.MULTILINE
     )
-    # Match the file+line context after a ! line: l.45 .... or \file.tex:123
-    line_re = re.compile(r"^l\.(?P<line>\d+)\s", re.MULTILINE)
-    # LaTeX Warning: ...
     warn_re = re.compile(r"^LaTeX Warning: (?P<msg>.+)$", re.MULTILINE)
-    # Overfull/underfull
     box_re = re.compile(
         r"^(Overfull|Underfull) \\[hv]box.+at lines? (?P<line>\d+)", re.MULTILINE
     )
-    # Package warnings
     pkg_re = re.compile(r"^Package \S+ Warning: (?P<msg>.+)$", re.MULTILINE)
 
     for m in error_re.finditer(log_text):
@@ -81,19 +75,12 @@ def _parse_log(log_text: str) -> tuple[list[CompileError], list[CompileError]]:
             )
         )
 
-    # Find ! lines without associated file:line matches
     bang_lines = list(bang_error_re.finditer(log_text))
-    for i, m in enumerate(bang_lines):
-        # Try to find a following line number
-        # Only add if not already captured by error_re above
-        already_captured = any(
-            m.group(0) in e.message for e in errors
-        )
+    for m in bang_lines:
+        already_captured = any(m.group(0) in e.message for e in errors)
         if not already_captured:
             errors.append(
-                CompileError(
-                    file="main.tex", line=None, message=m.group(0).strip()
-                )
+                CompileError(file="main.tex", line=None, message=m.group(0).strip())
             )
 
     for m in warn_re.finditer(log_text):
@@ -116,8 +103,43 @@ def _parse_log(log_text: str) -> tuple[list[CompileError], list[CompileError]]:
     return errors, warnings
 
 
+def _git_commit(src_dir: Path) -> bool:
+    """Auto-commit the document folder on successful compile. Returns True if committed."""
+    try:
+        git_dir = src_dir / ".git"
+        if not git_dir.exists():
+            subprocess.run(
+                ["git", "init"],
+                capture_output=True, text=True, cwd=str(src_dir), timeout=15,
+            )
+            (src_dir / ".gitignore").write_text(
+                ".build/\nout.pdf\n*.aux\n*.log\n*.out\n*.synctex*\n*.fdb_latexmk\n*.fls\n",
+                encoding="utf-8",
+            )
+
+        subprocess.run(
+            ["git", "add", "-A"],
+            capture_output=True, text=True, cwd=str(src_dir), timeout=15,
+        )
+
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            capture_output=True, cwd=str(src_dir), timeout=15,
+        )
+        if status.returncode == 0:
+            return False
+
+        subprocess.run(
+            ["git", "commit", "-m", "auto: successful compile"],
+            capture_output=True, text=True, cwd=str(src_dir), timeout=15,
+        )
+        return True
+    except Exception:
+        return False
+
+
 async def compile_doc(doc_path: str) -> CompileResult:
-    """Compile workspace/<doc_path>/main.tex with lualatex (two passes for cross-refs)."""
+    """Compile workspace/<doc_path>/main.tex with lualatex (two passes)."""
 
     src_dir = WORKSPACE / doc_path
     main_tex = src_dir / "main.tex"
@@ -132,8 +154,6 @@ async def compile_doc(doc_path: str) -> CompileResult:
     out_dir = src_dir / ".build"
     out_dir.mkdir(exist_ok=True)
 
-    # Use lualatex directly (latexmk requires Perl which may not be installed on Windows).
-    # Two passes resolve cross-references and TikZ overlays.
     base_cmd = [
         "lualatex",
         "-interaction=nonstopmode",
@@ -155,7 +175,6 @@ async def compile_doc(doc_path: str) -> CompileResult:
             )
             logs.append(r.stdout or "")
             logs.append(r.stderr or "")
-            # Abort early on first-pass failure
             if r.returncode != 0:
                 return r.returncode, "\n".join(logs)
         return 0, "\n".join(logs)
@@ -181,10 +200,12 @@ async def compile_doc(doc_path: str) -> CompileResult:
     if returncode == 0 and pdf_candidate.exists():
         stable_pdf = src_dir / "out.pdf"
         shutil.copy2(pdf_candidate, stable_pdf)
+        committed = await asyncio.to_thread(_git_commit, src_dir)
         return CompileResult(
-            success=True, pdf_path=stable_pdf, errors=errors, warnings=warnings, log=log_text
+            success=True, pdf_path=stable_pdf, errors=errors, warnings=warnings,
+            log=log_text, git_committed=committed,
         )
     else:
         return CompileResult(
-            success=False, pdf_path=None, errors=errors, warnings=warnings, log=log_text
+            success=False, pdf_path=None, errors=errors, warnings=warnings, log=log_text,
         )

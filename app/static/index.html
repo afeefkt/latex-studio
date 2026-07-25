@@ -9,45 +9,79 @@
 <body>
   <!-- Top bar -->
   <header id="topbar">
+    <button id="btn-toggle-sidebar" title="Toggle sidebar">☰</button>
     <span class="logo">LaTeX Studio</span>
-    <span id="doc-label">cv / main.tex</span>
+    <span id="doc-label">No document</span>
     <div class="topbar-actions">
       <span id="status-badge" class="badge idle">Idle</span>
       <button id="btn-compile" title="Compile (Ctrl+Enter)">▶ Compile</button>
-      <a id="btn-download" href="/api/pdf/cv" download="cv.pdf" class="btn-link">⬇ Download PDF</a>
+      <a id="btn-download" href="#" download class="btn-link" style="display:none">⬇ Download PDF</a>
     </div>
   </header>
 
-  <!-- Main workspace -->
-  <div id="workspace">
-    <!-- Editor pane -->
-    <div id="editor-pane">
-      <div id="editor-container"></div>
-      <div id="error-panel">
-        <div id="error-list"></div>
+  <!-- Main layout -->
+  <div id="app-layout">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div id="sidebar-header">
+        <span>Documents</span>
+        <button id="btn-new-doc" title="New document from template">+ New</button>
+      </div>
+      <nav id="doc-list">
+        <div class="sidebar-empty">Loading…</div>
+      </nav>
+    </aside>
+
+    <!-- Workspace -->
+    <div id="workspace">
+      <!-- Editor pane -->
+      <div id="editor-pane">
+        <!-- File tabs -->
+        <div id="file-tabs"></div>
+        <div id="editor-container"></div>
+        <div id="error-panel">
+          <div id="error-list"></div>
+        </div>
+      </div>
+
+      <!-- Resize handle -->
+      <div id="drag-handle"></div>
+
+      <!-- Preview pane -->
+      <div id="preview-pane">
+        <div id="pdf-toolbar">
+          <button id="btn-prev" title="Previous page">‹</button>
+          <span id="page-info">– / –</span>
+          <button id="btn-next" title="Next page">›</button>
+          <button id="btn-zoom-out" title="Zoom out">−</button>
+          <span id="zoom-label">100%</span>
+          <button id="btn-zoom-in" title="Zoom in">+</button>
+          <button id="btn-fit" title="Fit width">⊡ Fit</button>
+        </div>
+        <div id="pdf-scroll-container">
+          <canvas id="pdf-canvas"></canvas>
+        </div>
+        <div id="pdf-placeholder">
+          <p>PDF preview will appear here after compile.</p>
+          <p class="hint">Press <kbd>Ctrl+Enter</kbd> to compile.</p>
+        </div>
       </div>
     </div>
+  </div>
 
-    <!-- Resize handle -->
-    <div id="drag-handle"></div>
-
-    <!-- Preview pane -->
-    <div id="preview-pane">
-      <div id="pdf-toolbar">
-        <button id="btn-prev" title="Previous page">‹</button>
-        <span id="page-info">– / –</span>
-        <button id="btn-next" title="Next page">›</button>
-        <button id="btn-zoom-out" title="Zoom out">−</button>
-        <span id="zoom-label">100%</span>
-        <button id="btn-zoom-in" title="Zoom in">+</button>
-        <button id="btn-fit" title="Fit width">⊡ Fit</button>
+  <!-- Template picker modal -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal">
+      <div id="modal-header">
+        <span>New Document — Choose Template</span>
+        <button id="modal-close">✕</button>
       </div>
-      <div id="pdf-scroll-container">
-        <canvas id="pdf-canvas"></canvas>
-      </div>
-      <div id="pdf-placeholder">
-        <p>PDF preview will appear here after compile.</p>
-        <p class="hint">Press <kbd>Ctrl+Enter</kbd> to compile.</p>
+      <div id="template-grid"></div>
+      <div id="modal-footer">
+        <label for="new-doc-name">Document name:</label>
+        <input id="new-doc-name" type="text" placeholder="e.g. airbus_cover_letter" autofocus />
+        <button id="modal-create" disabled>Create</button>
+        <span id="modal-error" class="hidden"></span>
       </div>
     </div>
   </div>
