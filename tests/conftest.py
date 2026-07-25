@@ -17,10 +17,10 @@ def sample_facts() -> FactBank:
             "ada", "ada_design", "ada_modeling", "ada_automation",
         },
         all_numbers={
-            "8 years", "8", "6",
+            "8 years", "8", "6", "26262",
             "2024", "2023", "2021", "2017", "3", "10",
             "1 year", "1 year 1 month", "40", "60", "70", "90",
-            "2011", "2015", "2015", "2022",
+            "2011", "2015", "2022",
         },
         all_entities={
             "KooSys GmbH", "Valentum Engineering GmbH", "TATA Elxsi Ltd",
