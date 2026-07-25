@@ -2,3 +2,28 @@
 Reinitialized existing Git repository in D:/AI_Learnigns/LatexCoverLetter/.git/
 0 INIT 
 === ADD ===
+warning: in the working copy of 'app/importer.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'git_result.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'workspace/templates/designed-cv/main.tex.j2', LF will be replaced by CRLF the next time Git touches it
+0 ADD 
+=== STATUS ===
+M  app/docs.py
+A  app/importer.py
+M  app/main.py
+M  app/static/app.js
+M  app/static/index.html
+M  app/static/style.css
+A  git_check.bat
+A  git_commit.bat
+AM git_result.txt
+A  verify_phase3.py
+A  workspace/facts.yaml
+M  workspace/templates/ats-cv/main.tex.j2
+A  workspace/templates/designed-cv/main.tex.j2
+=== COMMIT ===
+9009 COMMIT 
+=== LOG ===
+af5bf83 Phase 3: Fact bank + data-driven rendering
+ca18308 P2: Workspace + templates — file tree, template gallery, git auto-commit
+fcff8c4 P1: Working LaTeX editor with live PDF preview
+=== DONE ===

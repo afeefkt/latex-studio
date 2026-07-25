@@ -1,0 +1,22 @@
+# ── Phase 4: Guard configuration ──
+
+hook_keys:
+  - rare_combination
+  - domain_transfer
+  - exact_match
+  - adjacent_expertise
+  - self_taught
+
+length_tolerance: 0.2
+reference_word_count: 250
+
+number_pattern: '(?<![A-Za-z])\d+(?:\.\d+)?\s*(?:%|years?|months?|weeks?)?|\b(?:19|20)\d{2}\b'
+
+entity_pattern: '[A-Z][a-z]+(?:\s+[A-Z][a-zA-Z]+)+|\b[A-Z]{2,}(?:\s+[A-Z]{2,})+\b|\bISO\s+\d+\b|\b[A-Z][a-z]+[A-Z][a-zA-Z0-9]+\b'
+
+certification_patterns:
+  - '(?i)certified\s+in\s+([\w\s\-]+?)(?:\.|,|$|\s)'
+  - '(?i)([\w\s\-]+)\s+certified'
+  - '(?i)holds?\s+(?:a\s+)?([\w\s\-]+?)\s+certification'
+  - '(?i)(?:earned|received|obtained)\s+([\w\s\-]+?)\s+(?:certification|cert)'
+  - '(?i)(?:has|have)\s+(?:a\s+)?([\w\s\-]+?)\s+(?:certification|degree|clearance)'
