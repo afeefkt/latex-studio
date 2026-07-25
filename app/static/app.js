@@ -52,6 +52,21 @@ const importTextarea = $("import-textarea");
 const importPanel    = $("import-panel");
 const modalImportBtn = $("modal-import-btn");
 
+// Chat DOM refs
+const chatMessages   = $("chat-messages");
+const chatInput      = $("chat-input");
+const chatProvider   = $("chat-provider");
+const btnChatSend    = $("btn-chat-send");
+const btnChatClear   = $("btn-chat-clear");
+const chatResizeHandle = $("chat-resize-handle");
+const chatPanel      = $("chat-panel");
+
+const chatModel     = $("chat-model");
+
+let chatHistory = [];
+let isStreaming = false;
+let chatAbortController = null;
+
 // ── CodeMirror setup ──────────────────────────────────────────────────────────
 
 function createEditor(doc = "") {
@@ -659,7 +674,298 @@ modalImportBtn.addEventListener("click", async () => {
   }
 });
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Chat: Provider/model switching ─────────────────────────────────────────────
+
+chatProvider.addEventListener("change", loadChatModels);
+loadChatModels();
+
+async function loadChatModels() {
+  const provider = chatProvider.value;
+  chatModel.innerHTML = '<option value="">Auto (use provider default)</option>';
+  try {
+    const resp = await fetch(`/api/chat/models?provider=${provider}`);
+    const data = await resp.json();
+    for (const m of data.models || []) {
+      chatModel.innerHTML += `<option value="${m.id}">${m.name}</option>`;
+    }
+  } catch (_) {}
+}
+
+// ── Chat: Send message ─────────────────────────────────────────────────────────
+
+btnChatSend.addEventListener("click", sendChatMessage);
+chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+});
+
+async function sendChatMessage() {
+  if (isStreaming) return stopStreaming();
+  const text = chatInput.value.trim();
+  if (!text) return;
+
+  chatInput.value = "";
+  chatInput.style.height = "auto";
+  chatHistory.push({ role: "user", content: text });
+  clearChatEmpty();
+  appendChatBubble("user", text);
+
+  const assistantBubble = appendChatBubble("assistant", "", true);
+  let fullText = "";
+
+  chatAbortController = new AbortController();
+  isStreaming = true;
+  btnChatSend.textContent = "Stop";
+  btnChatSend.style.background = "var(--error)";
+
+  try {
+    const resp = await fetch("/api/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: chatHistory,
+        provider: chatProvider.value || null,
+        model: chatModel.value || null,
+        doc_content: currentDoc ? getEditorContent() : null,
+      }),
+      signal: chatAbortController.signal,
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${errText}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let currentEvent = "message";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        // Parse SSE event type
+        if (line.startsWith("event: ")) {
+          currentEvent = line.slice(7).trim();
+          continue;
+        }
+
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (currentEvent === "error") {
+              assistantBubble.textContent = `Error: ${data.error}`;
+              assistantBubble.style.color = "var(--error)";
+              return;
+            }
+
+            if (currentEvent === "done") {
+              if (data.full_text) fullText = data.full_text;
+              break;
+            }
+
+            if (data.token) {
+              fullText += data.token;
+              assistantBubble.textContent = fullText;
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (fullText) {
+      chatHistory.push({ role: "assistant", content: fullText });
+      checkForDiff(assistantBubble, fullText);
+    } else if (!assistantBubble.textContent) {
+      assistantBubble.textContent = "(no response)";
+    }
+  } catch (e) {
+    if (e.name === "AbortError") {
+      if (fullText) {
+        assistantBubble.textContent = fullText + "\n\n[Stopped]";
+        chatHistory.push({ role: "assistant", content: fullText });
+        checkForDiff(assistantBubble, fullText);
+      } else {
+        assistantBubble.textContent = "[Cancelled]";
+      }
+    } else {
+      assistantBubble.textContent = `Error: ${e.message || "Could not reach LLM. Check your API key and network."}`;
+      assistantBubble.style.color = "var(--error)";
+    }
+  } finally {
+    isStreaming = false;
+    chatAbortController = null;
+    btnChatSend.textContent = "Send";
+    btnChatSend.style.background = "";
+    assistantBubble.classList.remove("streaming");
+    chatInput.focus();
+  }
+}
+
+function stopStreaming() {
+  if (chatAbortController) {
+    chatAbortController.abort();
+    chatAbortController = null;
+  }
+}
+
+// ── Chat: UI helpers ──────────────────────────────────────────────────────────
+
+function clearChatEmpty() {
+  const empty = chatMessages.querySelector(".chat-empty");
+  if (empty) empty.remove();
+}
+
+btnChatClear.addEventListener("click", () => {
+  chatHistory = [];
+  chatMessages.innerHTML = '<div class="chat-empty">Ask the AI to edit your LaTeX code.<br><small>e.g. "make section headers blue", "increase font size to 12pt"</small></div>';
+});
+
+function appendChatBubble(role, content, isStreamingBubble) {
+  const div = document.createElement("div");
+  div.className = `chat-msg ${role}`;
+  if (isStreamingBubble) div.classList.add("streaming");
+  div.textContent = content;
+  chatMessages.appendChild(div);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return div;
+}
+
+// ── Chat: Diff detection and Accept/Reject ────────────────────────────────────
+
+function checkForDiff(bubble, text) {
+  const texMatch = text.match(/```tex\s*([\s\S]*?)```/);
+  if (!texMatch) return;
+
+  const proposed = texMatch[1].trim();
+  const original = currentDoc ? getEditorContent() : "";
+
+  if (!original || !currentDoc) return;
+
+  fetch("/api/chat/diff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ original, proposed }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.has_changes) return;
+      appendDiffBlock(bubble, data.diff, data.patched);
+    })
+    .catch(() => {});
+}
+
+function appendDiffBlock(bubble, diffText, patchedText) {
+  const container = document.createElement("div");
+  container.className = "diff-block";
+
+  const header = document.createElement("div");
+  header.className = "diff-header";
+  header.innerHTML = '<span>Suggested edit</span>';
+
+  const actions = document.createElement("div");
+  actions.className = "diff-actions";
+
+  const acceptBtn = document.createElement("button");
+  acceptBtn.className = "btn-diff-accept";
+  acceptBtn.textContent = "Accept";
+  acceptBtn.addEventListener("click", async () => {
+    if (!currentDoc) return;
+    acceptBtn.disabled = true;
+    rejectBtn.disabled = true;
+    acceptBtn.textContent = "Applying…";
+    setEditorContent(patchedText);
+    try {
+      await fetch("/api/chat/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: patchedText, doc_path: currentDoc.path, file: currentFile }),
+      });
+    } catch (_) {}
+    acceptBtn.textContent = "✓ Applied";
+    container.style.opacity = "0.6";
+    await triggerCompile();
+  });
+
+  const rejectBtn = document.createElement("button");
+  rejectBtn.className = "btn-diff-reject";
+  rejectBtn.textContent = "Reject";
+  rejectBtn.addEventListener("click", () => {
+    acceptBtn.disabled = true;
+    rejectBtn.disabled = true;
+    rejectBtn.textContent = "✗ Rejected";
+    container.style.opacity = "0.4";
+  });
+
+  actions.appendChild(acceptBtn);
+  actions.appendChild(rejectBtn);
+  header.appendChild(actions);
+  container.appendChild(header);
+
+  const content = document.createElement("div");
+  content.className = "diff-content";
+  content.innerHTML = colorizeDiff(diffText);
+  container.appendChild(content);
+
+  bubble.appendChild(container);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function colorizeDiff(diffText) {
+  return diffText.split("\n").map(line => {
+    let cls = "diff-context";
+    if (line.startsWith("+++") || line.startsWith("---")) cls = "diff-hdr";
+    else if (line.startsWith("@@")) cls = "diff-hdr";
+    else if (line.startsWith("+")) cls = "diff-add";
+    else if (line.startsWith("-")) cls = "diff-del";
+    return `<span class="${cls}">${escapeHTML(line)}</span>`;
+  }).join("\n");
+}
+
+function escapeHTML(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ── Chat: Auto-resize input ────────────────────────────────────────────────────
+
+chatInput.addEventListener("input", () => {
+  chatInput.style.height = "auto";
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 80) + "px";
+});
+
+// ── Chat: Drag handle (resize chat panel) ──────────────────────────────────────
+
+chatResizeHandle.addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  const startY = e.clientY;
+  const startHeight = chatPanel.offsetHeight;
+
+  const onMove = (ev) => {
+    const delta = startY - ev.clientY;
+    const newH = Math.max(40, Math.min(500, startHeight + delta));
+    chatPanel.style.height = newH + "px";
+  };
+
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+  };
+
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
+});
 
 (async function init() {
   await loadDocList();

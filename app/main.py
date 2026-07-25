@@ -3,6 +3,7 @@ from pathlib import Path
 
 import app.compile  # noqa: F401 -- triggers MiKTeX PATH patch on import
 import app.docs as docs
+from app.chat import router as chat_router
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +30,7 @@ app = FastAPI(title="LaTeX Studio")
 
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+app.include_router(chat_router)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 

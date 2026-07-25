@@ -43,6 +43,32 @@
         <div id="error-panel">
           <div id="error-list"></div>
         </div>
+
+        <!-- Horizontal drag handle (between error panel and chat) -->
+        <div id="chat-resize-handle"></div>
+
+        <!-- Chat panel -->
+        <div id="chat-panel">
+          <div id="chat-header">
+            <span>Chat (LaTeX mode)</span>
+            <select id="chat-provider">
+              <option value="deepseek">DeepSeek</option>
+              <option value="nvidia">NVIDIA</option>
+              <option value="ollama">Ollama</option>
+            </select>
+            <select id="chat-model">
+              <option value="">Auto</option>
+            </select>
+            <button id="btn-chat-clear" title="Clear chat">✕</button>
+          </div>
+          <div id="chat-messages">
+            <div class="chat-empty">Ask the AI to edit your LaTeX code.<br><small>e.g. "make section headers blue", "increase font size to 12pt"</small></div>
+          </div>
+          <div id="chat-input-row">
+            <textarea id="chat-input" placeholder="Ask about LaTeX formatting…" rows="1"></textarea>
+            <button id="btn-chat-send">Send</button>
+          </div>
+        </div>
       </div>
 
       <!-- Resize handle -->
