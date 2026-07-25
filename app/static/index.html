@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LaTeX Studio</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- Top bar -->
+  <header id="topbar">
+    <span class="logo">LaTeX Studio</span>
+    <span id="doc-label">cv / main.tex</span>
+    <div class="topbar-actions">
+      <span id="status-badge" class="badge idle">Idle</span>
+      <button id="btn-compile" title="Compile (Ctrl+Enter)">▶ Compile</button>
+      <a id="btn-download" href="/api/pdf/cv" download="cv.pdf" class="btn-link">⬇ Download PDF</a>
+    </div>
+  </header>
+
+  <!-- Main workspace -->
+  <div id="workspace">
+    <!-- Editor pane -->
+    <div id="editor-pane">
+      <div id="editor-container"></div>
+      <div id="error-panel">
+        <div id="error-list"></div>
+      </div>
+    </div>
+
+    <!-- Resize handle -->
+    <div id="drag-handle"></div>
+
+    <!-- Preview pane -->
+    <div id="preview-pane">
+      <div id="pdf-toolbar">
+        <button id="btn-prev" title="Previous page">‹</button>
+        <span id="page-info">– / –</span>
+        <button id="btn-next" title="Next page">›</button>
+        <button id="btn-zoom-out" title="Zoom out">−</button>
+        <span id="zoom-label">100%</span>
+        <button id="btn-zoom-in" title="Zoom in">+</button>
+        <button id="btn-fit" title="Fit width">⊡ Fit</button>
+      </div>
+      <div id="pdf-scroll-container">
+        <canvas id="pdf-canvas"></canvas>
+      </div>
+      <div id="pdf-placeholder">
+        <p>PDF preview will appear here after compile.</p>
+        <p class="hint">Press <kbd>Ctrl+Enter</kbd> to compile.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- CodeMirror 6 (bundled ESM via jsDelivr) -->
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

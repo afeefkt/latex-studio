@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lualatex --version)",
+      "Bash(latexmk -v)",
+      "Bash(kpsewhich scrlttr2.cls)"
+    ]
+  }
+}
