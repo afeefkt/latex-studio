@@ -1,0 +1,4 @@
+=== INIT ===
+Reinitialized existing Git repository in D:/AI_Learnigns/LatexCoverLetter/.git/
+0 INIT 
+=== ADD ===

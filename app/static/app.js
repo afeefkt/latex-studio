@@ -48,6 +48,9 @@ const templateGrid   = $("template-grid");
 const newDocName     = $("new-doc-name");
 const modalCreate    = $("modal-create");
 const modalError     = $("modal-error");
+const importTextarea = $("import-textarea");
+const importPanel    = $("import-panel");
+const modalImportBtn = $("modal-import-btn");
 
 // ── CodeMirror setup ──────────────────────────────────────────────────────────
 
@@ -107,12 +110,7 @@ async function loadDocList() {
 }
 
 function renderDocList(docs) {
-  if (!docs.length) {
-    docList.innerHTML = '<div class="sidebar-empty">No documents yet. Click <strong>+ New</strong> to create one.</div>';
-    return;
-  }
-
-  docList.innerHTML = docs.map(d => {
+  let html = docs.map(d => {
     const icon = d.kind === "letter" ? "✉️" : "📄";
     const active = currentDoc && currentDoc.path === d.path ? " active" : "";
     return `<div class="doc-item${active}" data-path="${d.path}" data-kind="${d.kind}">
@@ -120,6 +118,19 @@ function renderDocList(docs) {
       <span class="doc-name">${d.name}</span>
     </div>`;
   }).join("");
+
+  // Add Fact Bank entry
+  const factsActive = currentDoc && currentDoc.path === "facts" ? " active" : "";
+  html += `<div class="doc-item${factsActive}" data-path="facts" data-kind="facts" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+    <span class="doc-icon">📋</span>
+    <span class="doc-name">Fact Bank</span>
+  </div>`;
+
+  if (!docs.length) {
+    docList.innerHTML = html || '<div class="sidebar-empty">No documents yet. Click <strong>+ New</strong> to create one.</div>';
+  } else {
+    docList.innerHTML = html;
+  }
 
   // Click handlers
   docList.querySelectorAll(".doc-item").forEach(el => {
@@ -132,9 +143,33 @@ function renderDocList(docs) {
 async function switchDocument(path, kind) {
   if (currentDoc && currentDoc.path === path) return;
 
-  // Save current doc content before switching
   if (currentDoc && currentFile) {
     await saveCurrentFile();
+  }
+
+  // Handle Fact Bank pseudo-document
+  if (path === "facts") {
+    currentDoc = { path: "facts", kind: "facts", name: "Fact Bank" };
+    currentFile = "facts.yaml";
+    docLabel.textContent = "Fact Bank";
+    docFiles = [];
+    renderFileTabs();
+    fileTabs.innerHTML = "";
+
+    try {
+      const resp = await fetch("/api/facts/raw");
+      const text = await resp.text();
+      setEditorContent(text);
+    } catch (e) {
+      setEditorContent("# Could not load facts.yaml");
+    }
+
+    docList.querySelectorAll(".doc-item").forEach(el => {
+      el.classList.toggle("active", el.dataset.path === path);
+    });
+    btnDownload.style.display = "none";
+    pdfPlaceholder.classList.remove("hidden");
+    return;
   }
 
   currentDoc = { path, kind, name: path.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()) };
@@ -215,11 +250,19 @@ async function saveCurrentFile() {
   if (!currentDoc || !currentFile) return;
   const content = getEditorContent();
   try {
-    await fetch(`/api/docs/${currentDoc.path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, file: currentFile }),
-    });
+    if (currentDoc.path === "facts") {
+      await fetch("/api/facts/raw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yaml_text: content }),
+      });
+    } else {
+      await fetch(`/api/docs/${currentDoc.path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, file: currentFile }),
+      });
+    }
   } catch (e) {
     console.error("Save error:", e);
   }
@@ -435,12 +478,47 @@ handle.addEventListener("mousedown", (e) => {
 
 // ── Modal: Template picker & new document ─────────────────────────────────────
 
+let modalMode = "create"; // "create" | "import"
+
 $("btn-new-doc").addEventListener("click", async () => {
+  modalMode = "create";
+  openModal();
+  await loadTemplateGrid();
+});
+
+$("btn-import").addEventListener("click", async () => {
+  modalMode = "import";
+  openModal();
+  showImportPanel();
+});
+
+function openModal() {
   modalOverlay.classList.remove("hidden");
   modalError.classList.add("hidden");
   modalCreate.disabled = true;
   newDocName.value = "";
+  templateGrid.classList.remove("hidden");
+  importPanel.classList.add("hidden");
+  modalImportBtn.classList.add("hidden");
+  modalCreate.classList.remove("hidden");
+  newDocName.style.display = "";
+  document.querySelector("#modal-footer label").style.display = "";
+  document.querySelector("#modal-header span").textContent = modalMode === "import" ? "Import Work History" : "New Document — Choose Template";
+}
 
+function showImportPanel() {
+  templateGrid.classList.add("hidden");
+  modalCreate.classList.add("hidden");
+  newDocName.style.display = "none";
+  document.querySelector("#modal-footer label").style.display = "none";
+  importPanel.classList.remove("hidden");
+  modalImportBtn.classList.remove("hidden");
+  importTextarea.value = "";
+  modalImportBtn.disabled = false;
+  modalImportBtn.textContent = "Import & Merge";
+}
+
+async function loadTemplateGrid() {
   try {
     const resp = await fetch("/api/templates");
     const data = await resp.json();
@@ -448,7 +526,7 @@ $("btn-new-doc").addEventListener("click", async () => {
   } catch {
     templateGrid.innerHTML = '<p style="color:var(--error);padding:16px">Could not load templates.</p>';
   }
-});
+}
 
 $("modal-close").addEventListener("click", () => {
   modalOverlay.classList.add("hidden");
@@ -526,6 +604,58 @@ modalCreate.addEventListener("click", async () => {
     modalError.classList.remove("hidden");
     modalCreate.textContent = "Create";
     modalCreate.disabled = false;
+  }
+});
+
+// ── Import & Merge ────────────────────────────────────────────────────────────
+
+modalImportBtn.addEventListener("click", async () => {
+  const text = importTextarea.value.trim();
+  if (!text) return;
+
+  modalImportBtn.disabled = true;
+  modalImportBtn.textContent = "Importing…";
+
+  try {
+    const resp = await fetch("/api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!resp.ok) {
+      modalError.textContent = "Import failed. Check format.";
+      modalError.classList.remove("hidden");
+      modalImportBtn.disabled = false;
+      modalImportBtn.textContent = "Import & Merge";
+      return;
+    }
+
+    const data = await resp.json();
+    const count = data.roles_found || 0;
+
+    await fetch("/api/facts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ facts: data.facts }),
+    });
+
+    modalOverlay.classList.add("hidden");
+    modalImportBtn.textContent = "Import & Merge";
+
+    if (currentDoc && currentDoc.path === "facts") {
+      const factsResp = await fetch("/api/facts/raw");
+      const factsText = await factsResp.text();
+      setEditorContent(factsText);
+    }
+
+    modalError.classList.add("hidden");
+    showErrors([{ file: "", line: null, message: `Imported ${count} roles. Facts saved. Review in Fact Bank.`, kind: "warning" }]);
+  } catch (e) {
+    modalError.textContent = "Network error. Try again.";
+    modalError.classList.remove("hidden");
+    modalImportBtn.disabled = false;
+    modalImportBtn.textContent = "Import & Merge";
   }
 });
 

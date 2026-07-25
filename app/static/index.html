@@ -13,6 +13,7 @@
     <span class="logo">LaTeX Studio</span>
     <span id="doc-label">No document</span>
     <div class="topbar-actions">
+      <button id="btn-import" title="Import work history from text">📥 Import</button>
       <span id="status-badge" class="badge idle">Idle</span>
       <button id="btn-compile" title="Compile (Ctrl+Enter)">▶ Compile</button>
       <a id="btn-download" href="#" download class="btn-link" style="display:none">⬇ Download PDF</a>
@@ -77,10 +78,14 @@
         <button id="modal-close">✕</button>
       </div>
       <div id="template-grid"></div>
+      <div id="import-panel" class="hidden">
+        <textarea id="import-textarea" placeholder="Paste your work history text here...&#10;&#10;Example:&#10;Embedded SW Development Engineer at KooSys GmbH, Regensburg (Sep 2024 - Present)&#10;- Developed MBD-based FOC algorithms...&#10;- Built 6-phase IPMSM Plant Model...&#10;Tools: MATLAB/Simulink, Embedded Coder, CANoe"></textarea>
+      </div>
       <div id="modal-footer">
         <label for="new-doc-name">Document name:</label>
-        <input id="new-doc-name" type="text" placeholder="e.g. airbus_cover_letter" autofocus />
+        <input id="new-doc-name" type="text" placeholder="e.g. airbus_cover_letter" />
         <button id="modal-create" disabled>Create</button>
+        <button id="modal-import-btn" class="hidden">Import & Merge</button>
         <span id="modal-error" class="hidden"></span>
       </div>
     </div>

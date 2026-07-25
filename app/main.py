@@ -9,7 +9,21 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.compile import compile_doc
-from app.docs import pdf_path, read_file, write_file, init_workspace
+from app.docs import (
+    create_document,
+    delete_document,
+    init_workspace,
+    list_doc_files,
+    list_documents,
+    list_templates,
+    load_facts,
+    pdf_path,
+    read_file,
+    render_template,
+    save_facts,
+    write_file,
+)
+from app.importer import import_to_facts
 
 app = FastAPI(title="LaTeX Studio")
 
@@ -41,16 +55,16 @@ async def health():
 # ── Document list ─────────────────────────────────────────────────────────────
 
 @app.get("/api/docs")
-async def list_documents():
-    return {"documents": docs.list_documents()}
+async def get_documents():
+    return {"documents": list_documents()}
 
 
 # ── Document files ────────────────────────────────────────────────────────────
 
 @app.get("/api/docs/{doc_path:path}/files")
-async def list_doc_files(doc_path: str):
+async def get_doc_files(doc_path: str):
     try:
-        files = docs.list_doc_files(doc_path)
+        files = list_doc_files(doc_path)
         return {"files": files}
     except FileNotFoundError:
         raise HTTPException(404, f"{doc_path} not found")
@@ -81,9 +95,9 @@ async def save_doc(doc_path: str, body: SaveBody):
 # ── Document deletion ─────────────────────────────────────────────────────────
 
 @app.delete("/api/docs/{doc_path:path}")
-async def delete_doc(doc_path: str):
+async def remove_doc(doc_path: str):
     try:
-        docs.delete_document(doc_path)
+        delete_document(doc_path)
         return {"deleted": True}
     except FileNotFoundError:
         raise HTTPException(404, f"{doc_path} not found")
@@ -92,8 +106,8 @@ async def delete_doc(doc_path: str):
 # ── Templates ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/templates")
-async def list_templates():
-    return {"templates": docs.list_templates()}
+async def get_templates():
+    return {"templates": list_templates()}
 
 
 class CreateBody(BaseModel):
@@ -105,12 +119,94 @@ class CreateBody(BaseModel):
 @app.post("/api/templates/{template_id}/create")
 async def create_from_template(template_id: str, body: CreateBody):
     try:
-        doc_info = docs.create_document(body.name, template_id, body.variables)
+        doc_info = create_document(body.name, template_id, body.variables)
         return {"created": True, "document": doc_info}
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     except FileExistsError as e:
         raise HTTPException(409, str(e))
+
+
+# ── Render (preview template without creating a document) ─────────────────────
+
+class RenderBody(BaseModel):
+    template_id: str
+    variables: dict = {}
+
+
+@app.post("/api/render")
+async def render_doc(body: RenderBody):
+    try:
+        rendered = render_template(body.template_id, body.variables)
+        return PlainTextResponse(rendered)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+
+
+# ── Fact bank ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/facts")
+async def get_facts():
+    facts = load_facts()
+    return facts
+
+
+class FactsBody(BaseModel):
+    facts: dict
+
+
+@app.post("/api/facts")
+async def update_facts(body: FactsBody):
+    try:
+        save_facts(body.facts)
+        return {"saved": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/facts/raw")
+async def get_facts_raw():
+    """Return raw YAML text of facts.yaml for editor display."""
+    try:
+        content = read_file("", "facts.yaml")
+        return PlainTextResponse(content)
+    except FileNotFoundError:
+        raise HTTPException(404, "facts.yaml not found")
+
+
+class RawFactsBody(BaseModel):
+    yaml_text: str
+
+
+@app.post("/api/facts/raw")
+async def update_facts_raw(body: RawFactsBody):
+    """Accept raw YAML, validate, and save facts.yaml."""
+    import yaml as _yaml
+    try:
+        data = _yaml.safe_load(body.yaml_text)
+        if not isinstance(data, dict):
+            raise ValueError("facts.yaml must be a YAML dictionary")
+    except Exception as e:
+        raise HTTPException(400, f"Invalid YAML: {e}")
+    save_facts(data)
+    return {"saved": True}
+
+
+# ── Import ─────────────────────────────────────────────────────────────────────
+
+class ImportBody(BaseModel):
+    text: str
+
+
+@app.post("/api/import")
+async def import_work_history(body: ImportBody):
+    """Parse work history text and return structured facts. Does NOT save."""
+    try:
+        existing = load_facts()
+        merged = import_to_facts(body.text, existing)
+        return {"facts": merged, "roles_found": len(merged.get("roles", []))}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ── Compile ───────────────────────────────────────────────────────────────────

@@ -511,6 +511,34 @@ kbd {
 }
 #modal-error.hidden { display: none; }
 
+/* ── Import text area ────────────────────────────────────────────────────── */
+#import-textarea {
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  line-height: 1.5;
+}
+#import-textarea:focus { outline: none; border-color: var(--accent); }
+#import-textarea::placeholder { color: var(--text-dim); }
+#import-panel { padding: 12px; }
+#import-panel.hidden { display: none; }
+
+#modal-import-btn {
+  background: var(--accent2);
+  color: #1e1e2e;
+  border-color: var(--accent2);
+  font-weight: 600;
+}
+#modal-import-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#modal-import-btn.hidden { display: none; }
+
 /* ── Scrollbar styling ───────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

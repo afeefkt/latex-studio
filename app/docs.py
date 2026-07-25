@@ -5,9 +5,12 @@ import shutil
 from pathlib import Path
 
 import jinja2
+import yaml
 
 WORKSPACE = Path(__file__).parent.parent / "workspace"
 TEMPLATES = WORKSPACE / "templates"
+FACTS_PATH = WORKSPACE / "facts.yaml"
+
 
 # ── Jinja2 environment for template rendering ──────────────────────────────────
 
@@ -43,6 +46,53 @@ def tex_escape(text: str) -> str:
 _jinja_env.filters["tex_escape"] = tex_escape
 
 
+# ── Fact bank ─────────────────────────────────────────────────────────────────
+
+def load_facts() -> dict:
+    """Load and return the facts.yaml content. Returns {} if missing."""
+    if not FACTS_PATH.exists():
+        return {}
+    return yaml.safe_load(FACTS_PATH.read_text(encoding="utf-8"))
+
+
+def save_facts(data: dict) -> None:
+    """Write facts back to facts.yaml."""
+    FACTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    FACTS_PATH.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+
+
+# ── Render ─────────────────────────────────────────────────────────────────────
+
+def render_template(template_id: str, variables: dict) -> str:
+    """
+    Render a template's main.tex.j2 (or main.tex) against variables.
+    For CV templates, facts are auto-loaded from facts.yaml if not provided.
+    Returns the rendered text.
+    """
+    tpl_dir = TEMPLATES / template_id
+    if not tpl_dir.exists():
+        raise FileNotFoundError(f"Template '{template_id}' not found")
+
+    # Auto-inject facts for CV templates
+    tdata = _load_template_data(template_id)
+    kind = tdata.get("kind", "")
+    if kind == "cv" and "facts" not in variables and FACTS_PATH.exists():
+        variables = {"facts": load_facts(), **variables}
+
+    j2_file = template_id + "/main.tex.j2"
+    j2_names = [n for n in _jinja_env.list_templates() if n == j2_file]
+    if j2_names:
+        tpl = _jinja_env.get_template(j2_file)
+        return tpl.render(**variables)
+
+    # Fallback: plain main.tex
+    main_tex = tpl_dir / "main.tex"
+    if main_tex.exists():
+        return main_tex.read_text(encoding="utf-8")
+
+    raise FileNotFoundError(f"Template '{template_id}' has no main.tex or main.tex.j2")
+
+
 def _render_j2_folder(template_id: str, target_dir: Path, variables: dict) -> None:
     """Render all .j2 files from a template folder into target_dir."""
     tpl_dir = TEMPLATES / template_id
@@ -56,10 +106,17 @@ def _render_j2_folder(template_id: str, target_dir: Path, variables: dict) -> No
             rendered = tpl.render(**variables)
             (target_dir / out_name).write_text(rendered, encoding="utf-8")
         elif item.is_dir():
-            shutil.copytree(item, dest, dirs_exist_ok=True)
+            if not dest.exists():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
         else:
             shutil.copy2(item, dest)
 
+
+def _load_template_data(template_id: str) -> dict:
+    tjson = TEMPLATES / template_id / "template.json"
+    if tjson.exists():
+        return json.loads(tjson.read_text(encoding="utf-8"))
+    return {}
 
 # ── Low-level file ops ────────────────────────────────────────────────────────
 
@@ -154,6 +211,7 @@ def list_templates() -> list[dict]:
 def create_document(name: str, template_id: str, variables: dict | None = None) -> dict:
     """
     Create a new document folder from a template.
+    For CV templates, facts.yaml is auto-loaded as 'facts' if not provided.
     Returns the document info dict.
     """
     variables = variables or {}
@@ -161,16 +219,16 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
     if not tpl_dir.exists():
         raise FileNotFoundError(f"Template '{template_id}' not found")
 
-    tjson = tpl_dir / "template.json"
-    if not tjson.exists():
-        raise FileNotFoundError(f"Template '{template_id}' has no template.json")
-
-    tdata = json.loads(tjson.read_text(encoding="utf-8"))
+    tdata = _load_template_data(template_id)
     default_vars = tdata.get("variables", {})
     merged = {**default_vars, **variables}
 
-    # Determine target folder
+    # Auto-inject facts for CV templates
     kind = tdata.get("kind", "cv")
+    if kind == "cv" and "facts" not in merged and FACTS_PATH.exists():
+        merged["facts"] = load_facts()
+
+    # Determine target folder
     if kind == "letter":
         target_dir = WORKSPACE / "letters" / name
     else:
@@ -181,8 +239,11 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
 
     target_dir.mkdir(parents=True)
 
-    # If template references another document to copy from (like designed-cv → cv)
-    if tdata.get("copy_from"):
+    has_copy_from = bool(tdata.get("copy_from"))
+    has_j2 = any(f.suffix == ".j2" for f in tpl_dir.iterdir())
+
+    # Step 1: copy static assets from source if copy_from is set
+    if has_copy_from:
         src_dir = WORKSPACE / tdata["copy_from"]
         if src_dir.exists():
             for item in src_dir.iterdir():
@@ -193,11 +254,12 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
                     shutil.copytree(item, dest, dirs_exist_ok=True)
                 else:
                     shutil.copy2(item, dest)
-    elif any(f.suffix == ".j2" for f in tpl_dir.iterdir()):
-        # Jinja2 template — render variables
+
+    # Step 2: render .j2 templates (overwrites main.tex if it was copied)
+    if has_j2:
         _render_j2_folder(template_id, target_dir, merged)
-    else:
-        # Plain copy
+    elif not has_copy_from:
+        # Plain copy (no j2, no copy_from)
         for item in tpl_dir.iterdir():
             if item.name == "template.json":
                 continue
