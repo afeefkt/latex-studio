@@ -7,7 +7,7 @@ from app.llm.openai_compat import OpenAICompatProvider
 
 class DeepSeekProvider(OpenAICompatProvider):
     base_url = "https://api.deepseek.com/v1"
-    default_model = "deepseek-v4-flash"
+    default_model = "deepseek-chat"
 
     @property
     def provider_name(self) -> str:

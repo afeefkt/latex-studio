@@ -1255,7 +1255,6 @@ async function generateDocs(channel) {
         channel,
         cv_template: cvTemplate,
         company_name: d.company_name || "",
-        company_name: d.company_name || "",
         role_title: d.role_title || "",
         location: d.location || "",
         focus_phrase: d.focus_phrase || "",

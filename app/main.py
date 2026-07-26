@@ -233,11 +233,13 @@ async def compile_endpoint(body: CompileBody):
         "git_committed": result.git_committed,
         "pdf_url": f"/api/pdf/{body.path}" if result.success else None,
         "errors": [
-            {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind}
+            {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind,
+             "translated": e.translated}
             for e in result.errors
         ],
         "warnings": [
-            {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind}
+            {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind,
+             "translated": e.translated}
             for e in result.warnings
         ],
         "log": result.log,

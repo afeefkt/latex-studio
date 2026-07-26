@@ -49,13 +49,17 @@ def get_provider(name: str | None = None, model: str | None = None) -> "LLMProvi
 
 def list_providers() -> list[dict]:
     return [
-        {"id": "deepseek", "name": "DeepSeek V4",
+        {"id": "deepseek", "name": "DeepSeek",
          "available": bool(os.getenv("DEEPSEEK_API_KEY")),
-         "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
+         "models": ["deepseek-chat", "deepseek-reasoner"]},
         {"id": "nvidia", "name": "NVIDIA NIM",
          "available": bool(os.getenv("NVIDIA_API_KEY")),
-         "models": ["deepseek-ai/deepseek-v4-flash", "meta/llama-3.1-70b-instruct",
-                    "nvidia/nemotron-4-340b-instruct"]},
+         "models": [
+             "meta/llama-3.1-70b-instruct",
+             "meta/llama-3.1-8b-instruct",
+             "deepseek-ai/deepseek-r1",
+             "mistralai/mixtral-8x22b-instruct-v0.1",
+         ]},
         {"id": "ollama", "name": "Ollama (local)",
          "available": True,
          "models": [os.getenv("OLLAMA_MODEL", "qwen2.5:14b")]},

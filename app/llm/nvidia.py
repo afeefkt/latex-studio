@@ -7,7 +7,7 @@ from app.llm.openai_compat import OpenAICompatProvider
 
 class NvidiaProvider(OpenAICompatProvider):
     base_url = "https://integrate.api.nvidia.com/v1"
-    default_model = "deepseek-ai/deepseek-v4-flash"
+    default_model = "meta/llama-3.1-70b-instruct"
 
     @property
     def provider_name(self) -> str:

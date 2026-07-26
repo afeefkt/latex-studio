@@ -335,11 +335,11 @@ async def apply_and_fix(body: ApplyFixRequest):
             compile_result = await compile_doc(doc_path)
 
             compile_errors = [
-                {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind}
+                {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind, "translated": e.translated}
                 for e in compile_result.errors
             ]
             compile_warnings = [
-                {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind}
+                {"file": e.file, "line": e.line, "message": e.message, "kind": e.kind, "translated": e.translated}
                 for e in compile_result.warnings
             ]
 
