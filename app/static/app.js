@@ -1092,8 +1092,20 @@ function renderFitReport(d) {
 
 // ── Apply view: generate the documents ────────────────────────────────────────
 
-$("btn-channel-portal").addEventListener("click", () => generateDocs("portal"));
-$("btn-channel-email").addEventListener("click", () => generateDocs("email"));
+// Channel button clicks fire generateDocs with the selected template
+$("btn-channel-portal").addEventListener("click", (e) => {
+  if (e.target.tagName === "SELECT") return; // let the select do its thing
+  generateDocs("portal");
+});
+$("btn-channel-email").addEventListener("click", (e) => {
+  if (e.target.tagName === "SELECT") return;
+  generateDocs("email");
+});
+
+// Stop select clicks from bubbling to the channel button
+document.querySelectorAll(".channel-template").forEach(sel => {
+  sel.addEventListener("click", (e) => e.stopPropagation());
+});
 
 async function generateDocs(channel) {
   if (!tailorResultData) return;
@@ -1103,12 +1115,19 @@ async function generateDocs(channel) {
   applyStep4.classList.add("hidden");
 
   const d = tailorResultData;
+  // Read the template selection for this channel
+  const templateSelect = channel === "portal"
+    ? $("portal-template-select")
+    : $("email-template-select");
+  const cvTemplate = templateSelect ? templateSelect.value : (channel === "portal" ? "ats-cv" : "optimized-cv");
   try {
     const resp = await fetch("/api/content/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         channel,
+        cv_template: cvTemplate,
+        company_name: d.company_name || "",
         company_name: d.company_name || "",
         role_title: d.role_title || "",
         location: d.location || "",

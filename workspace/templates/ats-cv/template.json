@@ -1,6 +1,10 @@
 {
   "name": "ATS CV",
   "kind": "cv",
-  "description": "Clean single-column CV for ATS systems and company portals.",
-  "channel": "ats"
+  "layout": "ats",
+  "icon": "📄",
+  "colour": "#89b4fa",
+  "description": "Clean single-column CV for ATS systems and company portals. Safe for any career-page upload.",
+  "requires": ["identity", "roles", "skills", "education", "languages", "awards"],
+  "variables": {}
 }

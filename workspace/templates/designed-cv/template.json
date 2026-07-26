@@ -1,6 +1,11 @@
 {
   "name": "Designed CV",
   "kind": "cv",
-  "description": "Two-column sidebar CV (FortySecondsCV). Best for human reviewers.",
-  "channel": "designed"
+  "layout": "designed",
+  "icon": "🎨",
+  "colour": "#cba6f7",
+  "description": "Full two-column sidebar CV (FortySecondsCV). Best for emailing directly to a hiring manager.",
+  "requires": ["identity", "roles", "skills", "education", "languages", "awards", "hobbies"],
+  "copy_from": "cv",
+  "variables": {}
 }

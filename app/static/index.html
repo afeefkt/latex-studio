@@ -61,17 +61,25 @@
         <div id="fit-report"></div>
       </section>
 
-      <!-- STEP 3 — channel choice -->
+      <!-- STEP 3 — channel choice + template picker -->
       <section class="apply-step hidden" id="apply-step-3">
         <h2><span class="step-num">3</span> Where is this application going?</h2>
         <div id="channel-choice">
-          <button class="channel-btn" id="btn-channel-portal">
+          <button class="channel-btn" id="btn-channel-portal" data-channel="portal">
             <span class="channel-title">🏢 Company portal</span>
             <span class="channel-sub">ATS-safe single column. Use for Airbus, Liebherr, Lufthansa Technik and any careers-page upload.</span>
+            <select class="channel-template" id="portal-template-select" data-channel="portal">
+              <option value="ats-cv">ATS CV (default)</option>
+            </select>
           </button>
-          <button class="channel-btn" id="btn-channel-email">
+          <button class="channel-btn" id="btn-channel-email" data-channel="email">
             <span class="channel-title">✉️ Email or recruiter</span>
-            <span class="channel-sub">Designed two-column layout. Use when a human opens the file directly.</span>
+            <span class="channel-sub">Designed layout. Use when a human opens the file directly.</span>
+            <select class="channel-template" id="email-template-select" data-channel="email">
+              <option value="optimized-cv">Optimised CV (default)</option>
+              <option value="designed-cv">Designed CV</option>
+              <option value="modern-cv">Modern CV</option>
+            </select>
           </button>
         </div>
         <div id="generate-status"></div>

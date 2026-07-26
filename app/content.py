@@ -362,6 +362,8 @@ async def tailor_letter(body: TailorRequest):
 class GenerateRequest(BaseModel):
     """Everything /tailor returned, plus the channel the user picked."""
     channel: str = "portal"                  # "portal" (ATS-safe) | "email" (designed)
+    cv_template: str = ""                    # template ID to use for CV (defaults based on channel)
+    edited_body: str = ""                    # user-edited letter body (Phase 2), empty = use assembled
     company_name: str = ""
     role_title: str = ""
     location: str = ""
@@ -452,7 +454,8 @@ async def generate_documents(body: GenerateRequest):
 
     # ── CV, in the variant that matches where it's going ──
     ats = body.channel != "email"
-    cv_template = "ats-cv" if ats else "optimized-cv"
+    # Use user-selected template if provided, else default per channel
+    cv_template = body.cv_template or ("ats-cv" if ats else "optimized-cv")
 
     role_groups = _group_bullets_by_role(facts, body.selected_bullet_ids)
     for rg in role_groups:

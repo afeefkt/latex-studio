@@ -1,7 +1,11 @@
 {
   "name": "Cover Letter",
   "kind": "letter",
-  "description": "KOMA-Script scrlttr2 cover letter with hook opener.",
+  "layout": "letter",
+  "icon": "✉️",
+  "colour": "#a6e3a1",
+  "description": "Professional KOMA-Script scrlttr2 cover letter with hook opener. DIN-compliant German layout.",
+  "requires": ["identity", "selected_bullets"],
   "variables": {
     "opening": "Dear Hiring Team,",
     "closing": "Yours sincerely,",

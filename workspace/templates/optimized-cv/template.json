@@ -1,6 +1,11 @@
 {
   "name": "Optimised CV",
   "kind": "cv",
-  "description": "Tailored two-column FortySecondsCV layout for email/recruiter submission.",
-  "channel": "designed"
+  "layout": "designed",
+  "icon": "⭐",
+  "colour": "#fab387",
+  "description": "Tailored two-column CV — only shows evidence relevant to the job. For recruiter inboxes.",
+  "requires": ["identity", "roles", "skills", "education", "awards"],
+  "copy_from": "cv",
+  "variables": {}
 }

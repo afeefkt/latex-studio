@@ -72,23 +72,140 @@ def save_facts(data: dict) -> None:
     FACTS_PATH.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True), encoding="utf-8")
 
 
+# ── Content adapter — canonical shape for all templates ────────────────────────
+
+def adapt_facts(facts: dict, template_id: str = "", selected_bullet_ids: list[str] | None = None) -> dict:
+    """
+    Project facts.yaml into the canonical shape every template consumes.
+
+    Instead of each template reaching into facts.roles / facts.identity / role_groups
+    with its own assumptions, this adapter produces a stable interface. Templates
+    declare which blocks they need in template.json (requires: [...]), and the adapter
+    assembles the flat dict accordingly.
+
+    Standard blocks:
+      identity    — name, title, email, phone, location, linkedin, github, about, ...
+      roles       — list of {org, title, dates, bullets: [{text, tags}]}
+      skills      — {expert: [], proficient: [], familiar: []}
+      education   — list of {degree, institution, years, focus}
+      languages   — list of {lang, level}
+      awards      — list of {year, title, org, description}
+      hobbies     — list of strings
+      contacts    — list of {icon, text} for sidebar icon tables
+
+    If selected_bullet_ids is provided, bullets in roles are filtered: only selected
+    IDs appear, and roles with no selected bullets fall back to their own bullets
+    (so employment gaps never appear).
+    """
+    result: dict = {}
+
+    # Identity — flat and accessible
+    identity = facts.get("identity", {})
+    result["identity"] = {
+        "name": identity.get("name", ""),
+        "title": identity.get("title", ""),
+        "email": identity.get("email", ""),
+        "phone": identity.get("phone", ""),
+        "location": identity.get("location", ""),
+        "address": identity.get("address", identity.get("location", "")),
+        "linkedin": identity.get("linkedin", ""),
+        "github": identity.get("github", ""),
+        "birthdate": identity.get("birthdate", ""),
+        "nationality": identity.get("nationality", ""),
+        "work_authorisation": identity.get("work_authorisation", ""),
+        "about": identity.get("about", ""),
+        "photo": identity.get("photo", ""),
+    }
+
+    # Roles — filtered by selected_bullet_ids if given
+    roles_raw = facts.get("roles", [])
+    selected = set(selected_bullet_ids or [])
+    roles_out = []
+    for role in roles_raw:
+        role_bullets = role.get("bullets", []) or []
+        if selected:
+            picked = [b for b in role_bullets if b.get("id") in selected]
+            shown = picked if picked else role_bullets
+        else:
+            shown = role_bullets
+        if not shown:
+            continue
+        roles_out.append({
+            "org": role.get("org", ""),
+            "title": role.get("title", ""),
+            "location": role.get("location", ""),
+            "start": role.get("start", ""),
+            "end": role.get("end", ""),
+            "duration": role.get("duration", ""),
+            "dates": f"{role.get('start', '')} -- {role.get('end', '')}",
+            "tools": role.get("tools", []),
+            "tailored": bool(selected and any(b.get("id") in selected for b in role_bullets)),
+            "bullets": [
+                {"id": b.get("id", ""), "text": b.get("text", ""), "tags": b.get("tags", [])}
+                for b in shown
+            ],
+        })
+    result["roles"] = roles_out
+
+    # Skills
+    result["skills"] = {
+        "expert": facts.get("skills", {}).get("expert", []),
+        "proficient": facts.get("skills", {}).get("proficient", []),
+        "familiar": facts.get("skills", {}).get("familiar", []),
+    }
+
+    # Education
+    result["education"] = facts.get("education", [])
+
+    # Languages
+    result["languages"] = facts.get("languages", [])
+
+    # Awards
+    result["awards"] = facts.get("awards", [])
+
+    # Hobbies
+    result["hobbies"] = facts.get("hobbies", [])
+
+    # Contacts — sidebar icon table entries
+    contacts = []
+    if identity.get("email"):
+        contacts.append({"icon": "email", "text": identity["email"]})
+    if identity.get("phone"):
+        contacts.append({"icon": "phone", "text": identity["phone"]})
+    if identity.get("linkedin"):
+        contacts.append({"icon": "linkedin", "text": identity["linkedin"]})
+    result["contacts"] = contacts
+
+    return result
+
+
 # ── Render ─────────────────────────────────────────────────────────────────────
 
 def render_template(template_id: str, variables: dict) -> str:
     """
     Render a template's main.tex.j2 (or main.tex) against variables.
-    For CV templates, facts are auto-loaded from facts.yaml if not provided.
+    For CV templates, facts are auto-loaded and adapted if not provided.
     Returns the rendered text.
     """
     tpl_dir = TEMPLATES / template_id
     if not tpl_dir.exists():
         raise FileNotFoundError(f"Template '{template_id}' not found")
 
-    # Auto-inject facts for CV templates
     tdata = _load_template_data(template_id)
     kind = tdata.get("kind", "")
+
+    # For CV templates, auto-load facts and adapt into canonical shape.
+    # The adapted dict is placed under the 'facts' key so templates access
+    # it as facts.identity.name, facts.roles, etc. — same API, canonical internals.
     if kind == "cv" and "facts" not in variables and FACTS_PATH.exists():
-        variables = {"facts": load_facts(), **variables}
+        facts_raw = load_facts()
+        adapted = adapt_facts(facts_raw, template_id)
+        variables = {**variables, "facts": adapted}
+    elif kind == "cv" and "facts" in variables:
+        facts_raw = variables.pop("facts", {})
+        adapted = adapt_facts(facts_raw, template_id, variables.get("selected_bullet_ids"))
+        variables = {**adapted, **variables}
+        variables["facts"] = adapted
 
     j2_file = template_id + "/main.tex.j2"
     j2_names = [n for n in _jinja_env.list_templates() if n == j2_file]
@@ -234,10 +351,12 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
     default_vars = tdata.get("variables", {})
     merged = {**default_vars, **variables}
 
-    # Auto-inject facts for CV templates
+    # Auto-inject and adapt facts for CV templates
     kind = tdata.get("kind", "cv")
-    if kind == "cv" and "facts" not in merged and FACTS_PATH.exists():
-        merged["facts"] = load_facts()
+    if kind == "cv" and FACTS_PATH.exists():
+        facts_raw = load_facts()
+        adapted = adapt_facts(facts_raw, template_id, merged.get("selected_bullet_ids"))
+        merged = {**merged, "facts": adapted}
 
     # Determine target folder
     if kind == "letter":
