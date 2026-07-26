@@ -258,12 +258,22 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
         src_dir = WORKSPACE / tdata["copy_from"]
         if src_dir.exists():
             for item in src_dir.iterdir():
-                if item.name in (".build", "out.pdf", "__pycache__"):
+                if item.name in (".build", "out.pdf", "__pycache__", ".gitignore"):
                     continue
                 dest = target_dir / item.name
                 if item.is_dir():
                     shutil.copytree(item, dest, dirs_exist_ok=True)
                 else:
+                    shutil.copy2(item, dest)
+        else:
+            # Fallback: copy class/pics bundled in the template directory
+            for item in tpl_dir.iterdir():
+                if item.name in ("template.json", "main.tex.j2"):
+                    continue
+                dest = target_dir / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                elif item.name != "main.tex":
                     shutil.copy2(item, dest)
 
     # Step 2: render .j2 templates (overwrites main.tex if it was copied)
