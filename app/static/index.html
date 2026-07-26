@@ -36,14 +36,21 @@
         <h2><span class="step-num">1</span> Paste the job ad</h2>
         <textarea id="jd-textarea" placeholder="Paste the full job description here — from LinkedIn, StepStone, or the company careers page.&#10;&#10;Cookie banners and 'people also viewed' clutter are fine, they get ignored."></textarea>
         <div class="apply-actions">
-          <select id="apply-provider">
-            <option value="deepseek">DeepSeek</option>
-            <option value="nvidia">NVIDIA</option>
-            <option value="ollama">Ollama (offline)</option>
-          </select>
-          <select id="apply-model"><option value="">Auto</option></select>
           <button id="btn-analyse" class="btn-primary">Analyse Job</button>
           <button id="btn-apply-reset" class="btn-ghost">Start over</button>
+          <button id="btn-apply-settings" class="btn-icon" title="AI provider settings">⚙</button>
+        </div>
+        <div id="apply-settings-panel" class="hidden">
+          <label>Provider
+            <select id="apply-provider">
+              <option value="deepseek">DeepSeek</option>
+              <option value="nvidia">NVIDIA</option>
+              <option value="ollama">Ollama (offline)</option>
+            </select>
+          </label>
+          <label>Model
+            <select id="apply-model"><option value="">Auto</option></select>
+          </label>
         </div>
         <div id="apply-status"></div>
       </section>

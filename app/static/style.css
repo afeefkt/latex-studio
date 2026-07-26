@@ -954,6 +954,39 @@ kbd {
   margin-left: auto;
 }
 .btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
+.btn-icon {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+.btn-icon:hover { color: var(--text); border-color: var(--text-dim); }
+#apply-settings-panel {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+#apply-settings-panel label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+#apply-settings-panel select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
 
 #apply-status, #generate-status { margin-top: 10px; font-size: 12px; min-height: 18px; }
 .apply-err  { color: var(--error); }

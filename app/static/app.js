@@ -73,7 +73,9 @@ const jdTextarea     = $("jd-textarea");
 const applyProvider  = $("apply-provider");
 const applyModel     = $("apply-model");
 const btnAnalyse     = $("btn-analyse");
-const btnApplyReset  = $("btn-apply-reset");
+const btnApplyReset    = $("btn-apply-reset");
+const btnApplySettings = $("btn-apply-settings");
+const applySettingsPanel = $("apply-settings-panel");
 const applyStatus    = $("apply-status");
 const fitReport      = $("fit-report");
 const generateStatus = $("generate-status");
@@ -854,6 +856,7 @@ async function loadApplyModels() {
 loadApplyModels();
 
 btnApplyReset.addEventListener("click", resetApplyFlow);
+btnApplySettings.addEventListener("click", () => applySettingsPanel.classList.toggle("hidden"));
 
 function resetApplyFlow() {
   jdTextarea.value = "";
