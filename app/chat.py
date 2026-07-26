@@ -253,8 +253,7 @@ async def apply_and_fix(body: ApplyFixRequest):
     try:
         current_content = read_file(doc_path, filename)
     except FileNotFoundError:
-        yield f"event: error\ndata: {json.dumps({'error': 'Document not found'})}\n\n"
-        return
+        raise HTTPException(404, "Document not found")
 
     system_prompt = _load_system_prompt()
     messages = [
@@ -265,7 +264,6 @@ async def apply_and_fix(body: ApplyFixRequest):
     ]
 
     original_content = current_content
-    all_snippets = []
 
     async def event_generator():
         nonlocal current_content
@@ -304,10 +302,10 @@ async def apply_and_fix(body: ApplyFixRequest):
 
             logger.info(f"Iteration {iteration}: LLM returned {len(llm_response)} chars")
 
-            # Extract tex code block
+            # Extract tex code block — if absent, treat as conversational reply
             tex_match = re.search(r"```tex\s*([\s\S]*?)```", llm_response)
             if not tex_match:
-                yield f"event: error\ndata: {json.dumps({'error': 'LLM did not return a tex code block'})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'success': False, 'reply': llm_response, 'iterations': iteration})}\n\n"
                 return
 
             snippet = tex_match.group(1).strip()
@@ -316,7 +314,6 @@ async def apply_and_fix(body: ApplyFixRequest):
                 yield f"event: error\ndata: {json.dumps({'error': 'LLM was unable to fix the errors'})}\n\n"
                 return
 
-            all_snippets.append(snippet)
             logger.info(f"Iteration {iteration}: snippet is {len(snippet)} chars")
 
             # Patch snippet into document

@@ -62,10 +62,34 @@ const chatResizeHandle = $("chat-resize-handle");
 const chatPanel      = $("chat-panel");
 
 const chatModel     = $("chat-model");
+const tailorResults = $("tailor-results");
+
+// Apply view DOM refs
+const applyView      = $("apply-view");
+const appLayout      = $("app-layout");
+const btnViewApply   = $("btn-view-apply");
+const btnViewEdit    = $("btn-view-edit");
+const jdTextarea     = $("jd-textarea");
+const applyProvider  = $("apply-provider");
+const applyModel     = $("apply-model");
+const btnAnalyse     = $("btn-analyse");
+const btnApplyReset  = $("btn-apply-reset");
+const applyStatus    = $("apply-status");
+const fitReport      = $("fit-report");
+const generateStatus = $("generate-status");
+const applyDownloads = $("apply-downloads");
+const applyStep2     = $("apply-step-2");
+const applyStep3     = $("apply-step-3");
+const applyStep4     = $("apply-step-4");
 
 let chatHistory = [];
 let isStreaming = false;
 let chatAbortController = null;
+let tailorResultData = null;
+
+// Applications view refs
+const appView = $("applications-view");
+const appList = $("applications-list");
 
 // ── CodeMirror setup ──────────────────────────────────────────────────────────
 
@@ -224,9 +248,10 @@ async function switchDocument(path, kind) {
   // Load PDF if available
   await tryLoadPdf();
 
-  // Update download link
+  // Update download link. Use the last path segment, not the whole path — a doc at
+  // "letters/tailored_acme-engineer" must not download as "letters_tailored_....pdf".
   btnDownload.href = `/api/pdf/${path}`;
-  btnDownload.download = `${path}.pdf`;
+  btnDownload.download = `${path.split("/").pop().replace(/^(tailored_|cv_)/, "")}.pdf`;
   btnDownload.style.display = "inline-block";
 }
 
@@ -482,6 +507,101 @@ $("btn-toggle-sidebar").addEventListener("click", () => {
   sidebar.classList.toggle("collapsed", !sidebarVisible);
 });
 
+// ── Applications view toggle ──────────────────────────────────────────────────
+
+$("btn-toggle-apps").addEventListener("click", toggleApplicationsView);
+$("btn-close-apps").addEventListener("click", () => {
+  appView.classList.add("hidden");
+  $("app-layout").style.display = "";
+});
+
+function toggleApplicationsView() {
+  if (appView.classList.contains("hidden")) {
+    appView.classList.remove("hidden");
+    $("app-layout").style.display = "none";
+    loadApplications();
+  } else {
+    appView.classList.add("hidden");
+    $("app-layout").style.display = "";
+  }
+}
+
+async function loadApplications() {
+  try {
+    const resp = await fetch("/api/applications");
+    const data = await resp.json();
+    renderApplications(data.applications);
+  } catch {
+    appList.innerHTML = '<div class="app-empty">Could not load applications.</div>';
+  }
+}
+
+function renderApplications(apps) {
+  if (!apps.length) {
+    appList.innerHTML = '<div class="app-empty">No applications yet.<br><small>Switch to Content mode and paste a job description to create your first one.</small></div>';
+    $("applications-title").textContent = "Applications";
+    return;
+  }
+  $("applications-title").textContent = `Applications (${apps.length})`;
+
+  appList.innerHTML = apps.map((a, i) => {
+    const total = a.matched_count + a.unmatched_count;
+    const pct = total > 0 ? Math.round((a.matched_count / total) * 100) : 0;
+    return `
+    <div class="app-card">
+      <div class="company">${a.company_name || "Unknown"}</div>
+      <div class="role">${a.role_title || "Unknown role"}</div>
+      <div class="meta">
+        <span>📅 ${a.date_generated || ""}</span>
+        <span class="score">✅ ${a.matched_count}/${total} matched (${pct}%)</span>
+        ${a.unmatched_count > 0 ? `<span class="gaps-warn">⚠ ${a.unmatched_count} gaps</span>` : ""}
+      </div>
+      ${a.unmatched_list ? `<div class="meta" style="margin-top:4px"><span class="gaps-warn">⚠ ${a.unmatched_list}</span></div>` : ""}
+      <div class="actions">
+        ${a.letter_path ? `<button class="btn-open-letter" data-path="${a.letter_path}">📄 Letter</button>` : ""}
+        ${a.cv_path ? `<button class="btn-open-cv" data-path="${a.cv_path}">⭐ CV</button>` : ""}
+        <select class="status-select" data-index="${i}">
+          <option value="generated" ${a.status === "generated" ? "selected" : ""}>generated</option>
+          <option value="applied" ${a.status === "applied" ? "selected" : ""}>applied</option>
+          <option value="interview" ${a.status === "interview" ? "selected" : ""}>interview</option>
+          <option value="offer" ${a.status === "offer" ? "selected" : ""}>offer</option>
+          <option value="rejected" ${a.status === "rejected" ? "selected" : ""}>rejected</option>
+          <option value="withdrawn" ${a.status === "withdrawn" ? "selected" : ""}>withdrawn</option>
+        </select>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Wire open buttons
+  appList.querySelectorAll(".btn-open-letter").forEach(btn => {
+    btn.addEventListener("click", () => {
+      appView.classList.add("hidden");
+      $("app-layout").style.display = "";
+      switchDocument(btn.dataset.path, "letter");
+    });
+  });
+  appList.querySelectorAll(".btn-open-cv").forEach(btn => {
+    btn.addEventListener("click", () => {
+      appView.classList.add("hidden");
+      $("app-layout").style.display = "";
+      switchDocument(btn.dataset.path, "cv");
+    });
+  });
+
+  // Wire status dropdowns
+  appList.querySelectorAll(".status-select").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      const index = parseInt(sel.dataset.index);
+      const value = sel.value;
+      await fetch(`/api/applications/${index}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field: "status", value }),
+      });
+    });
+  });
+}
+
 // ── Resize handle ─────────────────────────────────────────────────────────────
 
 const handle = $("drag-handle");
@@ -702,6 +822,282 @@ async function loadChatModels() {
   } catch (_) {}
 }
 
+// ── Apply view: the job-search workflow ───────────────────────────────────────
+
+function showView(which) {
+  const apply = which === "apply";
+  applyView.classList.toggle("hidden", !apply);
+  appLayout.classList.toggle("hidden", apply);
+  btnViewApply.classList.toggle("active", apply);
+  btnViewEdit.classList.toggle("active", !apply);
+  // Editor chrome is meaningless on the Apply screen
+  document.querySelectorAll(".topbar-actions .editor-only")
+    .forEach(el => el.classList.toggle("hidden", apply));
+  if (!apply && cmView) cmView.requestMeasure();
+}
+
+btnViewApply.addEventListener("click", () => showView("apply"));
+btnViewEdit.addEventListener("click", () => showView("edit"));
+
+applyProvider.addEventListener("change", loadApplyModels);
+
+async function loadApplyModels() {
+  applyModel.innerHTML = '<option value="">Auto</option>';
+  try {
+    const resp = await fetch(`/api/chat/models?provider=${applyProvider.value}`);
+    const data = await resp.json();
+    for (const m of data.models || []) {
+      applyModel.innerHTML += `<option value="${m.id}">${m.name}</option>`;
+    }
+  } catch (_) {}
+}
+loadApplyModels();
+
+btnApplyReset.addEventListener("click", resetApplyFlow);
+
+function resetApplyFlow() {
+  jdTextarea.value = "";
+  tailorResultData = null;
+  applyStatus.innerHTML = "";
+  fitReport.innerHTML = "";
+  generateStatus.innerHTML = "";
+  applyDownloads.innerHTML = "";
+  [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
+  jdTextarea.focus();
+}
+
+btnAnalyse.addEventListener("click", analyseJob);
+
+async function analyseJob() {
+  const jd = jdTextarea.value.trim();
+  if (!jd) {
+    applyStatus.innerHTML = '<span class="apply-err">Paste a job description first.</span>';
+    return;
+  }
+  if (jd.length < 120) {
+    applyStatus.innerHTML = '<span class="apply-err">That looks too short to be a full job ad — paste the whole posting.</span>';
+    return;
+  }
+
+  btnAnalyse.disabled = true;
+  btnAnalyse.textContent = "Analysing…";
+  applyStatus.innerHTML = '<span class="spinner"></span> Reading the job ad…';
+  [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
+
+  try {
+    const resp = await fetch("/api/content/tailor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_ad_text: jd,
+        provider: applyProvider.value || null,
+        model: applyModel.value || null,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const doneData = await consumeTailorStream(resp, applyStatus);
+
+    if (doneData && doneData.success) {
+      tailorResultData = doneData;
+      applyStatus.innerHTML = '<span class="apply-ok">✓ Analysed</span>';
+      renderFitReport(doneData);
+      applyStep2.classList.remove("hidden");
+      applyStep3.classList.remove("hidden");
+      applyStep2.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (doneData) {
+      applyStatus.innerHTML = `<span class="apply-err">${doneData.message || "Analysis failed"}</span>`;
+    }
+  } catch (e) {
+    applyStatus.innerHTML = `<span class="apply-err">${e.message || "Request failed"}</span>`;
+  } finally {
+    btnAnalyse.disabled = false;
+    btnAnalyse.textContent = "Analyse Job";
+  }
+}
+
+/** Read the tailor SSE stream. Returns the payload of the `done` event. */
+async function consumeTailorStream(resp, statusEl) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "message";
+  let doneData = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const data = JSON.parse(line.slice(6));
+
+        if (currentEvent === "error") {
+          statusEl.innerHTML = `<span class="apply-err">${data.error}</span>`;
+          return null;
+        }
+        if (currentEvent === "status") {
+          statusEl.innerHTML = `<span class="spinner"></span> ${data.message || ""}`;
+        }
+        if (currentEvent === "stage") {
+          if (data.stage === "guard_failed") {
+            statusEl.innerHTML =
+              `<span class="apply-err"><b>Blocked by the fact guard.</b><br>` +
+              data.errors.map(e => `Rule ${e.rule}: ${e.message}`).join("<br>") +
+              `<br><small>Nothing was written. This is the guard doing its job — the model tried to state something that is not in your fact bank.</small></span>`;
+            return null;
+          }
+          if (data.stage === "guard_warnings") {
+            statusEl.innerHTML =
+              `<span class="apply-warn">Warnings: ` +
+              data.warnings.map(w => `R${w.rule} ${w.message}`).join("; ") + `</span>`;
+          }
+        }
+        if (currentEvent === "done") { doneData = data; }
+      } catch (_) {}
+    }
+  }
+  return doneData;
+}
+
+function renderFitReport(d) {
+  const score = d.fit_score ?? 0;
+  const band = d.fit_band || "UNKNOWN";
+  const bandClass = { STRONG: "fit-strong", STRETCH: "fit-stretch", SKIP: "fit-skip" }[band] || "fit-unknown";
+  const bandIcon = { STRONG: "✅", STRETCH: "🟡", SKIP: "🔴" }[band] || "•";
+
+  let html = `
+    <div class="fit-headline ${bandClass}">
+      <div class="fit-score">${score}<span class="pct">%</span></div>
+      <div class="fit-verdict">
+        <div class="fit-band">${bandIcon} ${band}</div>
+        <div class="fit-reason">${escapeHTML(d.fit_reason || "")}</div>
+      </div>
+    </div>
+    <div class="fit-job">
+      <b>${escapeHTML(d.company_name || "")}</b> — ${escapeHTML(d.role_title || "")}
+      ${d.location ? ` · ${escapeHTML(d.location)}` : ""}
+    </div>`;
+
+  const matched = d.matched || [];
+  if (matched.length) {
+    html += '<div class="fit-section-title">✅ What you match</div><div class="fit-rows">';
+    for (const m of matched) {
+      const pct = Math.round((m.confidence || 0) * 100);
+      html += `<div class="result-row matched"><span class="phrase">${escapeHTML(m.phrase)}</span><span class="confidence">${pct}%</span></div>`;
+    }
+    html += "</div>";
+  }
+
+  const gaps = d.unmatched || [];
+  const hard = new Set(d.hard_gaps || []);
+  if (gaps.length) {
+    html += '<div class="fit-section-title">⚠️ Gaps — be ready to address these</div><div class="fit-rows">';
+    for (const g of gaps) {
+      const isHard = hard.has(g);
+      html += `<div class="result-row unmatched${isHard ? " hard" : ""}">
+        <span class="phrase">${escapeHTML(g)}</span>
+        ${isHard ? '<span class="hard-tag">hard requirement</span>' : ""}
+      </div>`;
+    }
+    html += "</div>";
+  }
+
+  if (d.notes) {
+    html += `<div class="fit-notes">💡 ${escapeHTML(d.notes)}</div>`;
+  }
+
+  fitReport.innerHTML = html;
+}
+
+// ── Apply view: generate the documents ────────────────────────────────────────
+
+$("btn-channel-portal").addEventListener("click", () => generateDocs("portal"));
+$("btn-channel-email").addEventListener("click", () => generateDocs("email"));
+
+async function generateDocs(channel) {
+  if (!tailorResultData) return;
+  const buttons = document.querySelectorAll(".channel-btn");
+  buttons.forEach(b => b.disabled = true);
+  generateStatus.innerHTML = '<span class="spinner"></span> Building your CV and cover letter, then compiling both…';
+  applyStep4.classList.add("hidden");
+
+  const d = tailorResultData;
+  try {
+    const resp = await fetch("/api/content/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel,
+        company_name: d.company_name || "",
+        role_title: d.role_title || "",
+        location: d.location || "",
+        focus_phrase: d.focus_phrase || "",
+        hook_key: d.hook_key || "",
+        selected_bullet_ids: d.selected_bullet_ids || [],
+        optimized_bullets: d.optimized_bullets || [],
+        unmatched: d.unmatched || [],
+        matched_count: (d.matched || []).length,
+        notes: d.notes || "",
+      }),
+    });
+
+    if (!resp.ok) {
+      const msg = await resp.text();
+      throw new Error(msg || `HTTP ${resp.status}`);
+    }
+    const out = await resp.json();
+    generateStatus.innerHTML = `<span class="apply-ok">✓ Generated — ${out.cv_variant}</span>`;
+    renderDownloads(out);
+    applyStep4.classList.remove("hidden");
+    applyStep4.scrollIntoView({ behavior: "smooth", block: "start" });
+    loadDocList();
+  } catch (e) {
+    generateStatus.innerHTML = `<span class="apply-err">${e.message || "Generation failed"}</span>`;
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+function renderDownloads(out) {
+  const row = (item, label) => {
+    const ok = item.success;
+    const status = ok
+      ? '<span class="dl-meta">compiled ✓</span>'
+      : `<span class="dl-meta" style="color:var(--error)">compile failed — open to fix</span>`;
+    const link = ok
+      ? `<a href="${item.url}" download="${item.filename}">⬇ ${escapeHTML(item.filename)}</a>`
+      : `<span>${escapeHTML(item.filename)}</span>`;
+    return `<div class="dl-row">
+      <span>${label}</span>
+      ${link}
+      ${status}
+      <button class="dl-open" data-path="${escapeHTML(item.doc_path)}">Open in editor</button>
+    </div>`;
+  };
+
+  applyDownloads.innerHTML =
+    row(out.cv, "📄 CV") +
+    row(out.letter, "✉️ Letter") +
+    `<div class="fit-notes">Logged to Applications (📊 in the top bar). ` +
+    `CV variant: <b>${escapeHTML(out.cv_variant)}</b>.</div>`;
+
+  applyDownloads.querySelectorAll(".dl-open").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const path = btn.dataset.path;
+      showView("edit");
+      await loadDocList();
+      await switchDocument(path, path.startsWith("letters/") ? "letter" : "cv");
+    });
+  });
+}
+
 // ── Chat: Send message ─────────────────────────────────────────────────────────
 
 btnChatSend.addEventListener("click", sendChatMessage);
@@ -715,7 +1111,9 @@ chatInput.addEventListener("keydown", (e) => {
 async function sendChatMessage() {
   if (isStreaming) return stopStreaming();
   const text = chatInput.value.trim();
-  if (!text || !currentDoc) return;
+  if (!text) return;
+
+  if (!currentDoc) return;
 
   chatInput.value = "";
   chatInput.style.height = "auto";
@@ -817,13 +1215,18 @@ async function sendChatMessage() {
               patchedText = data.patched || "";
               finalDiff = data.diff || "";
               finalWarnings = data.warnings || [];
+              if (data.reply) {
+                // Conversational response — no code patch
+                chatHistory.push({ role: "assistant", content: data.reply });
+                assistantBubble.textContent = data.reply;
+                statusLine.remove();
+              }
               break;
             }
 
             if (data.token) {
               fullText += data.token;
-              // Store in hidden content, keep status visible
-              assistantBubble.setAttribute("data-content", fullText);
+              statusLine.textContent = fullText;
               chatMessages.scrollTop = chatMessages.scrollHeight;
             }
           } catch (_) {}
@@ -833,6 +1236,8 @@ async function sendChatMessage() {
 
     if (success) {
       chatHistory.push({ role: "assistant", content: fullText });
+      assistantBubble.textContent = "";
+      assistantBubble.appendChild(statusLine);
       statusLine.innerHTML = `<span style="color:var(--ok)">✓ Done${iterations > 1 ? ` (fixed in ${iterations} attempts)` : ""}</span>`;
       setEditorContent(patchedText);
       triggerCompile();
@@ -871,7 +1276,8 @@ function stopStreaming() {
   }
 }
 
-// ── Chat: UI helpers ──────────────────────────────────────────────────────────
+// ── Chat: Content mode — JD tailoring ──────────────────────────────────────────
+
 
 function clearChatEmpty() {
   const empty = chatMessages.querySelector(".chat-empty");
@@ -880,6 +1286,8 @@ function clearChatEmpty() {
 
 btnChatClear.addEventListener("click", () => {
   chatHistory = [];
+  tailorResults.classList.add("hidden");
+  tailorResults.innerHTML = "";
   chatMessages.innerHTML = '<div class="chat-empty">Ask the AI to edit your LaTeX code.<br><small>e.g. "make section headers blue", "increase font size to 12pt"</small></div>';
 });
 

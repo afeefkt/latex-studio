@@ -10,7 +10,12 @@
   <!-- Top bar -->
   <header id="topbar">
     <button id="btn-toggle-sidebar" title="Toggle sidebar">☰</button>
+    <button id="btn-toggle-apps" title="Applications">📊</button>
     <span class="logo">LaTeX Studio</span>
+    <div id="view-toggle">
+      <button id="btn-view-apply" class="view-btn active">📋 Apply</button>
+      <button id="btn-view-edit" class="view-btn">✏️ Edit</button>
+    </div>
     <span id="doc-label">No document</span>
     <div class="topbar-actions">
       <button id="btn-undo" title="Undo (Ctrl+Z)">↩</button>
@@ -22,8 +27,60 @@
     </div>
   </header>
 
+  <!-- Apply view — the job-search workflow. Default landing view. -->
+  <div id="apply-view">
+    <div id="apply-container">
+
+      <!-- STEP 1 — paste the job ad -->
+      <section class="apply-step" id="apply-step-1">
+        <h2><span class="step-num">1</span> Paste the job ad</h2>
+        <textarea id="jd-textarea" placeholder="Paste the full job description here — from LinkedIn, StepStone, or the company careers page.&#10;&#10;Cookie banners and 'people also viewed' clutter are fine, they get ignored."></textarea>
+        <div class="apply-actions">
+          <select id="apply-provider">
+            <option value="deepseek">DeepSeek</option>
+            <option value="nvidia">NVIDIA</option>
+            <option value="ollama">Ollama (offline)</option>
+          </select>
+          <select id="apply-model"><option value="">Auto</option></select>
+          <button id="btn-analyse" class="btn-primary">Analyse Job</button>
+          <button id="btn-apply-reset" class="btn-ghost">Start over</button>
+        </div>
+        <div id="apply-status"></div>
+      </section>
+
+      <!-- STEP 2 — fit report -->
+      <section class="apply-step hidden" id="apply-step-2">
+        <h2><span class="step-num">2</span> Does this job fit?</h2>
+        <div id="fit-report"></div>
+      </section>
+
+      <!-- STEP 3 — channel choice -->
+      <section class="apply-step hidden" id="apply-step-3">
+        <h2><span class="step-num">3</span> Where is this application going?</h2>
+        <div id="channel-choice">
+          <button class="channel-btn" id="btn-channel-portal">
+            <span class="channel-title">🏢 Company portal</span>
+            <span class="channel-sub">ATS-safe single column. Use for Airbus, Liebherr, Lufthansa Technik and any careers-page upload.</span>
+          </button>
+          <button class="channel-btn" id="btn-channel-email">
+            <span class="channel-title">✉️ Email or recruiter</span>
+            <span class="channel-sub">Designed two-column layout. Use when a human opens the file directly.</span>
+          </button>
+        </div>
+        <div id="generate-status"></div>
+      </section>
+
+      <!-- STEP 4 — done -->
+      <section class="apply-step hidden" id="apply-step-4">
+        <h2><span class="step-num">4</span> Ready to send</h2>
+        <div id="apply-downloads"></div>
+      </section>
+
+    </div>
+  </div>
+
   <!-- Main layout -->
-  <div id="app-layout">
+  <div id="app-layout" class="hidden">
     <!-- Sidebar -->
     <aside id="sidebar">
       <div id="sidebar-header">
@@ -52,7 +109,7 @@
         <!-- Chat panel -->
         <div id="chat-panel">
           <div id="chat-header">
-            <span>Chat (LaTeX mode)</span>
+            <span class="chat-title">LaTeX help</span>
             <select id="chat-provider">
               <option value="deepseek">DeepSeek</option>
               <option value="nvidia">NVIDIA</option>
@@ -66,6 +123,7 @@
           <div id="chat-messages">
             <div class="chat-empty">Ask the AI to edit your LaTeX code.<br><small>e.g. "make section headers blue", "increase font size to 12pt"</small></div>
           </div>
+          <div id="tailor-results" class="hidden"></div>
           <div id="chat-input-row">
             <textarea id="chat-input" placeholder="Ask about LaTeX formatting…" rows="1"></textarea>
             <button id="btn-chat-send">Send</button>
@@ -117,6 +175,15 @@
         <span id="modal-error" class="hidden"></span>
       </div>
     </div>
+  </div>
+
+  <!-- Applications view -->
+  <div id="applications-view" class="hidden">
+    <div id="applications-header">
+      <span id="applications-title">Applications</span>
+      <button id="btn-close-apps">✕</button>
+    </div>
+    <div id="applications-list"></div>
   </div>
 
   <!-- CodeMirror 6 (bundled ESM via jsDelivr) -->

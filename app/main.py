@@ -4,6 +4,8 @@ from pathlib import Path
 import app.compile  # noqa: F401 -- triggers MiKTeX PATH patch on import
 import app.docs as docs
 from app.chat import router as chat_router
+from app.content import router as content_router
+from app.tracker import list_applications as tracker_list, update_application as tracker_update
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +33,7 @@ app = FastAPI(title="LaTeX Studio")
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 app.include_router(chat_router)
+app.include_router(content_router)
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
@@ -255,6 +258,26 @@ async def get_pdf(doc_path: str):
 @app.get("/api/git/{doc_path:path}")
 async def git_log(doc_path: str):
     return {"commits": docs.git_log(doc_path)}
+
+
+# ── Applications tracker ───────────────────────────────────────────────────────
+
+@app.get("/api/applications")
+async def list_applications():
+    return {"applications": tracker_list()}
+
+
+class UpdateAppBody(BaseModel):
+    field: str
+    value: str
+
+
+@app.post("/api/applications/{index}")
+async def update_application(index: int, body: UpdateAppBody):
+    ok = tracker_update(index, body.field, body.value)
+    if not ok:
+        raise HTTPException(400, f"Could not update application {index}")
+    return {"updated": True}
 
 
 # ── SPA fallback ──────────────────────────────────────────────────────────────
