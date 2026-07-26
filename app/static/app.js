@@ -696,11 +696,22 @@ function renderTemplateGrid(templates) {
       <div class="tpl-desc">${t.description}</div>
       <div class="tpl-kind">${t.kind === 'letter' ? 'Cover Letter' : 'CV'}</div>
     </div>
-  `).join("");
+  `).join("") + `
+    <div class="tpl-card" id="tpl-card-ai-map" style="border-style:dashed">
+      <div class="tpl-icon" style="background:var(--accent2)">🤖</div>
+      <div class="tpl-name">Create from .tex</div>
+      <div class="tpl-desc">Paste any LaTeX CV template you found online. The AI reads its macros and maps them to your fact bank.</div>
+      <div class="tpl-kind">AI Mapper</div>
+    </div>
+  `;
 
   let selectedTemplate = null;
   templateGrid.querySelectorAll(".tpl-card").forEach(card => {
     card.addEventListener("click", () => {
+      if (card.id === "tpl-card-ai-map") {
+        showMapTemplatePanel();
+        return;
+      }
       templateGrid.querySelectorAll(".tpl-card").forEach(c => c.classList.remove("selected"));
       card.classList.add("selected");
       selectedTemplate = card.dataset.id;
@@ -712,6 +723,122 @@ function renderTemplateGrid(templates) {
     modalCreate.disabled = !selectedTemplate || !newDocName.value.trim();
     modalError.classList.add("hidden");
   };
+}
+
+// ── AI Template Mapping ───────────────────────────────────────────────────────
+
+function showMapTemplatePanel() {
+  templateGrid.classList.add("hidden");
+  importPanel.classList.add("hidden");
+  const mapPanel = document.getElementById("map-template-panel");
+  if (mapPanel) mapPanel.classList.remove("hidden");
+  modalCreate.classList.add("hidden");
+  newDocName.style.display = "none";
+  document.querySelector("#modal-footer label").style.display = "none";
+  document.querySelector("#modal-header span").textContent = "AI Template Mapper — Create from .tex";
+}
+
+document.getElementById("btn-map-template").addEventListener("click", mapTemplate);
+
+async function mapTemplate() {
+  const texContent = document.getElementById("map-tex-textarea").value.trim();
+  const templateName = document.getElementById("map-template-name").value.trim();
+  const layout = document.getElementById("map-template-layout").value;
+  const statusEl = document.getElementById("map-template-status");
+  const resultEl = document.getElementById("map-template-result");
+  const btn = document.getElementById("btn-map-template");
+
+  if (!texContent || texContent.length < 200) {
+    statusEl.innerHTML = '<span style="color:var(--error)">Paste the full .tex template (at least 200 characters).</span>';
+    return;
+  }
+  if (!templateName) {
+    statusEl.innerHTML = '<span style="color:var(--error)">Enter a name for the new template.</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Analysing…";
+  statusEl.innerHTML = '<span class="spinner"></span> AI is reading the template and mapping to your data…';
+  resultEl.innerHTML = "";
+
+  try {
+    const resp = await fetch("/api/content/map-template", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        raw_tex: texContent,
+        template_name: templateName,
+        layout: layout,
+      }),
+    });
+
+    if (!resp.ok) {
+      const msg = await resp.text();
+      throw new Error(msg || `HTTP ${resp.status}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let doneData = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.token) {
+              statusEl.textContent += data.token;
+            }
+            if (data.step && data.message) {
+              statusEl.innerHTML = `<span class="spinner"></span> ${data.message}`;
+            }
+            if (event?.type === "done" || (typeof data.success !== "undefined" && data.template_id)) {
+              doneData = data;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    // Wait for done event from the stream
+    if (!doneData) {
+      // Try direct parsing of last event
+      statusEl.innerHTML = '<span style="color:var(--warn)">Could not determine result — check the Templates list.</span>';
+      btn.disabled = false;
+      btn.textContent = "Analyse Template";
+      return;
+    }
+
+    if (doneData.success) {
+      statusEl.innerHTML = '<span class="apply-ok">✓ Adapter created and validated against your fact bank!</span>';
+      resultEl.innerHTML = `
+        <div style="margin-top:10px;padding:10px;background:var(--surface2);border-radius:6px;font-size:12px">
+          <b>Template:</b> ${doneData.template_id} (${doneData.rendered_lines} lines rendered)<br>
+          <b>Warnings:</b> ${(doneData.guard_warnings || []).length || "none"}<br>
+          <button class="btn-ghost" style="margin-top:6px" onclick="document.getElementById('modal-overlay').classList.add('hidden');loadDocList()">Close & refresh</button>
+        </div>`;
+      // Reload template grid
+      setTimeout(() => loadTemplateGrid(), 1000);
+    } else {
+      statusEl.innerHTML = '<span class="apply-err">Adapter has guard errors — review below</span>';
+      const errs = (doneData.guard_errors || []).map(e =>
+        `<span style="color:var(--error)">R${e.rule}: ${e.message}</span>`
+      ).join("<br>");
+      resultEl.innerHTML = `<div style="margin-top:10px;padding:10px;background:rgba(243,139,168,0.1);border-radius:6px;font-size:12px">${errs}</div>`;
+    }
+  } catch (e) {
+    statusEl.innerHTML = `<span class="apply-err">${e.message || "Mapping failed"}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Analyse Template";
+  }
 }
 
 modalCreate.addEventListener("click", async () => {

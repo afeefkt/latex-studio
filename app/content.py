@@ -749,3 +749,172 @@ async def optimize_cv(body: OptimizeCvRequest):
         "doc_path": doc_info["path"],
         "name": doc_info["name"],
     }
+
+
+# ── Phase 4: AI template mapping ──────────────────────────────────────────────
+
+MAP_TEMPLATE_PROMPT = """
+You are a LaTeX-to-Jinja adapter. Given a raw LaTeX CV/resume template, your job is to
+produce a Jinja2 `.j2` file that renders the template from the canonical content shape below.
+
+== CANONICAL CONTENT SHAPE ==
+
+Every template receives a `facts` dict with these fields:
+
+facts.identity:
+  .name, .title, .email, .phone, .location, .address, .linkedin, .github,
+  .birthdate, .nationality, .work_authorisation, .about, .photo
+
+facts.roles: list of {
+  .org, .title, .location, .start, .end, .duration, .dates,
+  .tools (list of str), .tailored (bool),
+  .bullets: list of { .id, .text, .tags (list of str) }
+}
+
+facts.skills: { .expert: [str], .proficient: [str], .familiar: [str] }
+facts.education: list of { .degree, .institution, .location, .years, .focus }
+facts.languages: list of { .lang, .level }
+facts.awards: list of { .year, .title, .org, .description }
+facts.hobbies: list of str
+facts.contacts: list of { .icon, .text }
+
+== JINJA2 SYNTAX ==
+
+Use these delimiters (NOT standard {{ }}):
+  Variable: \\VAR{ facts.identity.name | tex_escape }
+  Block:    \\BLOCK{ for role in facts.roles } ... \\BLOCK{ endfor }
+  Comment:  \\#{ this is a comment }
+
+The `tex_escape` filter must be applied to EVERY value from facts. Always filter.
+
+== RULES ==
+
+1. Identify every data-bearing command in the template (\\cvname, \\cvitem, \\section, \\textbf, etc.)
+2. Map each one to the closest canonical field above.
+3. Replace raw LaTeX data with \\VAR{} references, wrapped in \\BLOCK{} loops where needed.
+4. Preserve ALL preamble, packages, styling, and non-data LaTeX code unchanged.
+5. NEVER invent facts. If a template field has no matching canonical data, use an empty \\VAR{} or a comment.
+6. Output ONLY the complete .j2 file in a ```tex code block. No explanation outside the block.
+7. Use \\VAR{ ... | tex_escape } for EVERY value. Do NOT use bare \\VAR{}.
+""".strip()
+
+
+class MapTemplateRequest(BaseModel):
+    raw_tex: str
+    template_name: str
+    layout: str = "designed"       # "ats" or "designed"
+    provider: str | None = None
+    model: str | None = None
+
+
+@router.post("/map-template")
+async def map_template(body: MapTemplateRequest):
+    """AI reads an unfamiliar .tex CV template and produces a .j2 adapter."""
+    raw_tex = body.raw_tex.strip()
+    if not raw_tex:
+        raise HTTPException(400, "Template text is required")
+    if len(raw_tex) < 200:
+        raise HTTPException(400, "Template too short — paste the full .tex file")
+
+    template_name = body.template_name.strip().lower().replace(" ", "-")[:40]
+    if not template_name:
+        raise HTTPException(400, "Template name is required")
+
+    facts = load_facts()
+    if not facts:
+        raise HTTPException(400, "facts.yaml not found — the adapter needs sample data to validate against")
+
+    # Build the LLM prompt
+    messages = [
+        {"role": "system", "content": MAP_TEMPLATE_PROMPT},
+        {"role": "user", "content": f"Here is a sample of the canonical data shape (use these field paths):\n\n```json\n{json.dumps({k: type(v).__name__ for k, v in facts.items()}, indent=2)}\n```"},
+        {"role": "assistant", "content": "I understand the data shape. Send me the LaTeX template and I'll produce the .j2 adapter."},
+        {"role": "user", "content": f"Convert this LaTeX template to a .j2 adapter:\n\n```tex\n{raw_tex[:15000]}\n```"},
+    ]
+
+    async def event_generator():
+        llm = None
+        try:
+            yield f"event: status\ndata: {json.dumps({'step': 'calling_llm', 'message': 'Asking the AI to map template macros to your data...'})}\n\n"
+
+            llm = get_provider(body.provider, body.model)
+            full = ""
+            async for token in llm.chat(messages, stream=True):
+                full += token
+                yield f"data: {json.dumps({'token': token})}\n\n"
+
+            # Extract .j2 from response
+            tex_match = re.search(r"```tex\s*([\s\S]*?)```", full)
+            if not tex_match:
+                yield f"event: error\ndata: {json.dumps({'error': 'AI did not produce a code block — try again or simplify the template.'})}\n\n"
+                return
+
+            j2_content = tex_match.group(1).strip()
+
+            # ── Guard validation: render the .j2 against facts ──
+            yield f"event: status\ndata: {json.dumps({'step': 'validating', 'message': 'Rendering adapter against your fact bank to check for hallucinations...'})}\n\n"
+
+            # Save as a temporary template to validate
+            tpl_dir = Path(__file__).parent.parent / "workspace" / "templates" / template_name
+            tpl_dir.mkdir(parents=True, exist_ok=True)
+            (tpl_dir / "main.tex.j2").write_text(j2_content, encoding="utf-8")
+            (tpl_dir / "template.json").write_text(json.dumps({
+                "name": body.template_name,
+                "kind": "cv",
+                "layout": body.layout,
+                "icon": "🤖",
+                "colour": "#89b4fa",
+                "description": f"AI-mapped template from user-provided .tex",
+                "requires": ["identity", "roles"],
+                "variables": {},
+            }), encoding="utf-8")
+
+            # Render against real facts
+            try:
+                rendered = render_template(template_name, {"facts": facts})
+            except Exception as e:
+                yield f"event: error\ndata: {json.dumps({'error': f'Adapter rendering failed: {str(e)[:200]}'})}\n\n"
+                return
+
+            # Guard check on rendered output
+            factbank = load_factbank()
+            validation = validate_tailor_response(
+                {"selected_bullet_ids": [], "matched_requirements": [],
+                 "focus_phrase": "test", "hook_key": "exact_match"},
+                "", factbank, assembled_text=rendered,
+            )
+
+            guard_errors = [{"rule": e.rule, "message": e.message, "detail": e.detail} for e in validation.errors]
+            guard_warnings = [{"rule": w.rule, "message": w.message} for w in validation.warnings]
+
+            yield f"event: done\ndata: {json.dumps({
+                'success': validation.passed,
+                'template_id': template_name,
+                'j2_content': j2_content,
+                'rendered_lines': len(rendered.splitlines()),
+                'guard_errors': guard_errors,
+                'guard_warnings': guard_warnings,
+                'message': 'Adapter saved and validated.' if validation.passed else 'Adapter has issues — review errors above.',
+            })}\n\n"
+
+        except ValueError as e:
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        except Exception as e:
+            logger.error(f"Template mapping error: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': f'Mapping failed: {e}'})}\n\n"
+        finally:
+            if llm is not None:
+                try:
+                    await llm.close()
+                except Exception:
+                    pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

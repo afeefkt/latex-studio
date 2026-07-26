@@ -182,6 +182,21 @@
       <div id="import-panel" class="hidden">
         <textarea id="import-textarea" placeholder="Paste your work history text here...&#10;&#10;Example:&#10;Embedded SW Development Engineer at KooSys GmbH, Regensburg (Sep 2024 - Present)&#10;- Developed MBD-based FOC algorithms...&#10;- Built 6-phase IPMSM Plant Model...&#10;Tools: MATLAB/Simulink, Embedded Coder, CANoe"></textarea>
       </div>
+      <!-- AI template mapping panel -->
+      <div id="map-template-panel" class="hidden">
+        <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Paste a LaTeX CV template you found online. The AI will read its macros and produce a Jinja adapter that renders from your fact bank.</p>
+        <textarea id="map-tex-textarea" placeholder="Paste the full .tex file here..." style="width:100%;min-height:180px;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:12px;color:var(--text);font-size:12px;font-family:'Cascadia Code',monospace;line-height:1.4"></textarea>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <input id="map-template-name" type="text" placeholder="Template name (e.g. alta-cv)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text);font-size:12px;font-family:'Cascadia Code',monospace" />
+          <select id="map-template-layout" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:6px 10px;font-size:12px">
+            <option value="designed">Designed layout</option>
+            <option value="ats">ATS-safe layout</option>
+          </select>
+          <button id="btn-map-template" class="btn-primary" style="padding:6px 14px;font-size:12px">Analyse Template</button>
+        </div>
+        <div id="map-template-status" style="margin-top:8px;font-size:12px"></div>
+        <div id="map-template-result" style="margin-top:8px"></div>
+      </div>
       <div id="modal-footer">
         <label for="new-doc-name">Document name:</label>
         <input id="new-doc-name" type="text" placeholder="e.g. airbus_cover_letter" />
