@@ -30,7 +30,7 @@
 
 \cvname{\VAR{ facts.identity.name | tex_escape }}
 \cvjobtitle{\VAR{ facts.identity.title | tex_escape }}
-\cvprofilepic{pics/PIC_SQR.png}
+\BLOCK{ if facts.identity.photo }\cvprofilepic{\VAR{ facts.identity.photo | tex_escape }}\BLOCK{ endif }
 \cvbirthday{\VAR{ facts.identity.birthdate | tex_escape }}
 \cvaddress{\VAR{ facts.identity.address | tex_escape }}
 \cvphone{\VAR{ facts.identity.phone | tex_escape }}

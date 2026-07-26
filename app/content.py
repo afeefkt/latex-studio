@@ -114,9 +114,9 @@ def score_fit(matched: list[dict], unmatched: list[str], requirements: list[dict
     earned = sum(float(m.get("confidence", 0) or 0) for m in matched)
     score = round((earned / total) * 100)
 
-    if score >= 65:
+    if score >= 55:
         band, reason = "STRONG", "Strong fit — worth applying."
-    elif score >= 40:
+    elif score >= 35:
         band, reason = "STRETCH", "Stretch — apply if you want it, and lead with the transferable angle."
     else:
         band, reason = "SKIP", "Weak fit — your evening is probably better spent on another posting."

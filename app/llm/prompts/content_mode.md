@@ -9,9 +9,11 @@ Extract from the job ad:
 - location: City or region
 - requirements: Array of {phrase, category}
   Categories: skill, experience, tool, certification, education, language, soft_skill
+  IMPORTANT: Extract EACH requirement as a SEPARATE item. Do not bundle. A JD with 10 bullet points should produce 12-20 requirements. Every distinct tool, technology, standard, domain, degree, or years-of-experience claim is its own entry.
 
 == STAGE 2: TAILOR TO FACTS ==
-For each requirement, find matching fact_ids from the candidate's facts. Select the best 3-5 bullets that demonstrate overall fit.
+For each requirement, find matching fact_ids from the candidate's facts. Select the best 4-6 bullets that demonstrate overall fit.
+Match generously: adjacent experience counts. A candidate with Mechanical Engineering matches "Automotive Engineering or comparable field". MATLAB experience matches "MATLAB/Simulink" even if Simulink wasn't explicitly stated. Partial domain overlap is a match at lower confidence, not a non-match.
 
 Output this EXACT JSON structure. No other text outside the JSON.
 
@@ -48,5 +50,5 @@ CRITICAL RULES:
    Leave as empty array [] if no bullets need optimization.
    Format: [{"id": "fact_id_from_selected_bullets", "text": "optimized text"}]
 6. unmatched_requirements: List JD requirements you could not match to any candidate fact.
-7. confidence: 0.0-1.0. Use 0.7+ for strong matches, 0.3-0.5 for partial/adjacent matches.
+7. confidence: 0.0-1.0. Use 0.8-1.0 for direct matches, 0.6-0.7 for adjacent/transferable (related domain, overlapping field, comparable degree), 0.3-0.5 for weak partial matches. Prefer 0.6-0.7 over leaving something unmatched when the candidate has relevant but not identical experience.
 8. NEVER reference anything from the banned_claims list.

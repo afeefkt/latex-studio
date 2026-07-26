@@ -2,6 +2,7 @@
 #
 # The scorer decides whether Afeef spends an evening on an application, so the
 # calibration matters as much as the arithmetic. These lock in the band edges.
+# Thresholds: STRONG >= 55%, STRETCH 35-54%, SKIP < 35%.
 
 import pytest
 
@@ -72,10 +73,10 @@ def test_low_confidence_matches_score_below_high_confidence():
 
 @pytest.mark.parametrize("conf,expected_band", [
     (1.00, "STRONG"),    # 100%
-    (0.66, "STRONG"),    # 66% — just over the 65 line
-    (0.64, "STRETCH"),   # 64% — just under
-    (0.40, "STRETCH"),   # 40% — lower edge
-    (0.39, "SKIP"),      # 39% — just under
+    (0.56, "STRONG"),    # 56% — just over the 55 line
+    (0.54, "STRETCH"),   # 54% — just under
+    (0.36, "STRETCH"),   # 36% — lower edge of stretch
+    (0.34, "SKIP"),      # 34% — just under
 ])
 def test_band_edges(conf, expected_band):
     """One matched requirement out of one, at varying confidence."""

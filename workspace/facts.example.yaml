@@ -18,6 +18,7 @@ identity:
     aerospace domains. Specialised in model-based design, real-time systems,
     and safety-critical software development.
   work_authorisation: "EU citizen — no visa required"
+  # photo: "pics/PIC_SQR.png"  # optional — square crop, place the file in workspace/templates/*/pics/
 
 education:
 - degree: "B.Sc. Electrical Engineering"
