@@ -117,33 +117,20 @@ def _rule_1_parse(response: dict | str, errors: list) -> TailorResponse | None:
 # ── Rule 2: fact_ids exist in facts.yaml ───────────────────────────────────────
 
 def _rule_2_fact_ids(parsed: TailorResponse, facts: FactBank, errors: list) -> None:
-    all_ids_in_response: set[str] = set()
-
+    # matched_requirements.fact_ids are display/scoring only — strip invalid ones silently
+    # rather than blocking the whole response. The LLM sometimes references YAML section
+    # names (e.g. 'identity', 'skills') that aren't bullet IDs; filtering is safer than abort.
     for req in parsed.matched_requirements:
-        for fid in req.fact_ids:
-            all_ids_in_response.add(fid)
-            if fid not in facts.all_fact_ids:
-                errors.append(ValidationIssue(
-                    rule=2, severity="error",
-                    message=f"Invented fact_id: '{fid}'",
-                    detail=f"In matched_requirements for phrase '{req.jd_phrase}'",
-                ))
+        req.fact_ids = [fid for fid in req.fact_ids if fid in facts.all_fact_ids]
 
+    # selected_bullet_ids go directly into the document — these must be real.
     for bid in parsed.selected_bullet_ids:
-        all_ids_in_response.add(bid)
         if bid not in facts.all_fact_ids:
             errors.append(ValidationIssue(
                 rule=2, severity="error",
                 message=f"Invented bullet_id: '{bid}'",
                 detail="In selected_bullet_ids",
             ))
-
-    # Verify that selected_bullet_ids are a subset of matched fact_ids
-    matched_ids = all_ids_in_response
-    for bid in parsed.selected_bullet_ids:
-        if bid not in matched_ids and bid in facts.all_fact_ids:
-            # This is a logic error: selected but not matched. Not a hallucination.
-            pass
 
 
 # ── Rule 3: focus_phrase appears in job ad ─────────────────────────────────────

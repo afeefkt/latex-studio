@@ -28,8 +28,23 @@ def test_invalid_json_missing_field(sample_facts, sample_job_ad):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_invented_fact_id(sample_facts, sample_job_ad):
-    """Mandated test #1: invented fact_id → Rule 2 error."""
+    """Rule 2: invented ID in selected_bullet_ids → error; invented ID only in
+    matched_requirements → silently stripped (display only, not written to document)."""
+    # Invalid in selected_bullet_ids → must block
     bad = TailorResponse(
+        matched_requirements=[
+            MatchedRequirement(jd_phrase="test", fact_ids=["koosys_foc"], confidence=0.9),
+        ],
+        selected_bullet_ids=["fake_bullet_99"],
+        focus_phrase="MATLAB/Simulink",
+        hook_key="exact_match",
+    )
+    result = validate_tailor_response(bad, sample_job_ad, sample_facts)
+    assert not result.passed
+    assert any("fake_bullet_99" in e.message for e in result.errors)
+
+    # Invalid only in matched_requirements → stripped silently, does NOT block
+    ok = TailorResponse(
         matched_requirements=[
             MatchedRequirement(jd_phrase="test", fact_ids=["fake_bullet_99"], confidence=0.9),
         ],
@@ -37,9 +52,10 @@ def test_invented_fact_id(sample_facts, sample_job_ad):
         focus_phrase="MATLAB/Simulink",
         hook_key="exact_match",
     )
-    result = validate_tailor_response(bad, sample_job_ad, sample_facts)
-    assert not result.passed
-    assert any("fake_bullet_99" in e.message for e in result.errors)
+    result2 = validate_tailor_response(ok, sample_job_ad, sample_facts)
+    assert result2.passed  # guard must not block on this
+    # and the bad ID was stripped from the requirement
+    assert ok.matched_requirements[0].fact_ids == []
 
 
 def test_invented_selected_bullet_id(sample_facts, sample_job_ad):
@@ -274,7 +290,8 @@ def test_combined_failures(sample_facts, sample_job_ad):
 
 
 def test_rule_2_double_counted_ids(sample_facts, sample_job_ad):
-    """Same fake ID in both matched_requirements and selected → reported once per occurrence."""
+    """Fake ID in selected_bullet_ids → one Rule 2 error; fake IDs only in
+    matched_requirements are silently stripped, not counted as errors."""
     bad = TailorResponse(
         matched_requirements=[
             MatchedRequirement(jd_phrase="test", fact_ids=["nonexistent_id"], confidence=0.9),
@@ -285,9 +302,10 @@ def test_rule_2_double_counted_ids(sample_facts, sample_job_ad):
         hook_key="exact_match",
     )
     result = validate_tailor_response(bad, sample_job_ad, sample_facts)
-    # Should report each occurrence
     rule2_errors = [e for e in result.errors if e.rule == 2]
-    assert len(rule2_errors) >= 2
+    # Exactly one error: the ID in selected_bullet_ids
+    assert len(rule2_errors) == 1
+    assert "nonexistent_id" in rule2_errors[0].message
 
 
 def test_rule_6_known_numbers_pass(sample_facts, sample_job_ad, valid_letter_text):
