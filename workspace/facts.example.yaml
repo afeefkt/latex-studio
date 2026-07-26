@@ -1,0 +1,95 @@
+# ── facts.example.yaml ──────────────────────────────────────────────────────
+# Copy this to facts.yaml and fill in your real data.
+# This file uses obviously fake data so it is safe to commit.
+
+identity:
+  name: "Alex Sample"
+  title: "Embedded Software Engineer"
+  email: "alex.sample@example.com"
+  phone: "+49 123 4567890"
+  address: "123 Example Street, 12345 Berlin"
+  location: "Berlin, Germany"
+  linkedin: "https://linkedin.com/in/alexsample"
+  github: "https://github.com/alexsample"
+  birthdate: "1990-01-01"
+  nationality: "German"
+  about: >
+    Embedded software engineer with 5 years of experience in automotive and
+    aerospace domains. Specialised in model-based design, real-time systems,
+    and safety-critical software development.
+  work_authorisation: "EU citizen — no visa required"
+
+education:
+- degree: "B.Sc. Electrical Engineering"
+  institution: "Technical University of Example"
+  location: "Munich, Germany"
+  years: "2010 -- 2014"
+  focus: "Control systems, embedded programming"
+
+roles:
+- id: "role_example_gmbh"
+  role_title: "Embedded SW Engineer"
+  org: "Example GmbH"
+  location: "Munich, Germany"
+  start: "Jan 2020"
+  end: "Present"
+  dates: "2020 -- now"
+  duration: "4 yr"
+  bullets:
+  - id: "b_example_001"
+    text: "Developed AUTOSAR Classic BSW configuration for body control module."
+    tags: ["AUTOSAR", "C"]
+  - id: "b_example_002"
+    text: "Implemented ISO 26262 ASIL-B compliant diagnostics module in C."
+    tags: ["ISO 26262", "C", "diagnostics"]
+  - id: "b_example_003"
+    text: "Created MATLAB/Simulink plant models for HIL test environment."
+    tags: ["MATLAB/Simulink", "HIL", "testing"]
+
+- id: "role_prev_company"
+  role_title: "Junior SW Developer"
+  org: "Previous Corp"
+  location: "Hamburg, Germany"
+  start: "Sep 2014"
+  end: "Dec 2019"
+  dates: "2014 -- 2019"
+  duration: "5 yr"
+  bullets:
+  - id: "b_prev_001"
+    text: "Maintained legacy C code for engine control unit, reducing bug count by 30%."
+    tags: ["C", "ECU", "maintenance"]
+
+skills:
+  expert:
+    - "C"
+    - "AUTOSAR Classic"
+    - "ISO 26262"
+  proficient:
+    - "MATLAB/Simulink"
+    - "Python"
+    - "CANoe"
+  familiar:
+    - "MISRA C"
+    - "Git"
+    - "Jenkins"
+
+languages:
+- lang: "English"
+  level: "C1"
+- lang: "German"
+  level: "B2"
+
+awards:
+- title: "Best Engineer Award"
+  year: "2022"
+  org: "Example GmbH"
+  description: "Awarded for exceptional performance on the X-Project."
+
+banned_claims:
+  - "ISTQB certified"
+  - "security clearance"
+  - "PhD"
+  - "team lead"
+
+certifications_held: []
+certifications_in_progress: []

@@ -1,0 +1,94 @@
+\documentclass[a4paper,11pt]{scrartcl}
+
+\usepackage[left=20mm, right=20mm, top=20mm, bottom=20mm]{geometry}
+\usepackage{fontspec}
+\defaultfontfeatures{Ligatures=TeX}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+\usepackage{xcolor}
+
+\definecolor{accent}{HTML}{2B579A}
+
+\newcommand{\sectionheader}[1]{%
+  \vspace{1.2em}
+  \noindent{\large\bfseries\color{accent} #1}\par
+  \vspace{2pt}
+  \noindent\rule{\textwidth}{0.4pt}
+  \vspace{0.6em}
+}
+
+\begin{document}
+
+\begin{center}
+  {\Huge\bfseries \VAR{ facts.identity.name | tex_escape }\\}
+  \vspace{0.4em}
+  {\large\bfseries \VAR{ facts.identity.title | tex_escape }\\}
+  \vspace{0.6em}
+  \small
+  \VAR{ facts.identity.email | tex_escape } \,|\, \VAR{ facts.identity.phone | tex_escape } \,|\, \VAR{ facts.identity.location | tex_escape } \\
+  \href{\VAR{ facts.identity.linkedin | tex_escape }}{LinkedIn} \,|\, \href{\VAR{ facts.identity.github | tex_escape }}{GitHub}
+\end{center}
+
+\sectionheader{Professional Summary}
+\VAR{ facts.identity.about | tex_escape }
+
+\sectionheader{Work Experience}
+\#{ role_groups is the tailored view: every role, but only the bullets selected }
+\#{ for this job. Falls back to the full fact bank when rendered untailored.     }
+\BLOCK{ for role in (role_groups or facts.roles) }
+\subsection*{\VAR{ role.role_title | default(role.title) | tex_escape }}
+\textbf{\VAR{ role.org | tex_escape }}\BLOCK{ if role.location }, \VAR{ role.location | tex_escape }\BLOCK{ endif } \hfill \VAR{ role.start | tex_escape } -- \VAR{ role.end | tex_escape }
+\begin{itemize}
+\BLOCK{ for bullet in role.bullets }
+  \item \VAR{ bullet.text | tex_escape }
+\BLOCK{ endfor }
+\end{itemize}
+\BLOCK{ if role.tools }
+\small\textit{Tools:} \VAR{ role.tools | join(', ') | tex_escape }\par
+\BLOCK{ endif }
+\medskip
+\BLOCK{ endfor }
+
+\sectionheader{Education}
+\BLOCK{ for edu in facts.education }
+\textbf{\VAR{ edu.degree | tex_escape }} -- \VAR{ edu.institution | tex_escape }\BLOCK{ if edu.location }, \VAR{ edu.location | tex_escape }\BLOCK{ endif } \hfill \VAR{ edu.years | tex_escape }
+\BLOCK{ if edu.focus }
+\par\small \VAR{ edu.focus | tex_escape }
+\BLOCK{ endif }
+\medskip
+\BLOCK{ endfor }
+
+\sectionheader{Skills}
+\BLOCK{ if facts.skills.expert }
+\textbf{Expert:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\
+\BLOCK{ endif }
+\BLOCK{ if facts.skills.proficient }
+\textbf{Proficient:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\
+\BLOCK{ endif }
+\BLOCK{ if facts.skills.familiar }
+\textbf{Familiar:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
+\BLOCK{ endif }
+
+\BLOCK{ if facts.awards }
+\sectionheader{Awards}
+\BLOCK{ for award in facts.awards }
+\textbf{\VAR{ award.title | tex_escape }} \hfill \VAR{ award.year | tex_escape } \\
+\VAR{ award.org | tex_escape }
+\BLOCK{ if award.description }
+\par\small \VAR{ award.description | tex_escape }
+\BLOCK{ endif }
+\BLOCK{ endfor }
+\BLOCK{ endif }
+
+\sectionheader{Languages}
+\BLOCK{ for lang in facts.languages }
+\VAR{ lang.lang | tex_escape } (\VAR{ lang.level | tex_escape })\BLOCK{ if not loop.last } \,|\, \BLOCK{ endif }
+\BLOCK{ endfor }
+
+\vfill
+\begin{center}
+  \textcolor{gray}{\small Work authorisation: \VAR{ facts.identity.work_authorisation | tex_escape }}
+\end{center}
+
+\end{document}

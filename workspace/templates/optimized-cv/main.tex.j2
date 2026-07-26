@@ -1,0 +1,116 @@
+\documentclass[
+	a4paper,
+]{fortysecondscv}
+
+\usepackage{microtype}
+\usepackage{ragged2e}
+\usepackage{xcolor}
+
+\ifxetexorluatex
+	\usepackage{fontspec}
+	\defaultfontfeatures{Ligatures=TeX}
+\else
+	\usepackage[utf8]{inputenc}
+	\usepackage[T1]{fontenc}
+\fi
+
+\usepackage{amssymb}
+\usepackage{smartdiagram}
+\smartdiagramset{
+	bubble center node font = \footnotesize,
+	bubble node font = \footnotesize,
+	bubble center node size = 0.4\sidebartextwidth,
+	bubble node size = 0.25\sidebartextwidth,
+	distance center/other bubbles = 1.5em,
+	bubble center node color = maincolor!70,
+	set color list = {maincolor!10, maincolor!40,
+	maincolor!20, maincolor!60, maincolor!35},
+	bubble fill opacity = 0.8,
+}
+
+\cvname{\VAR{ facts.identity.name | tex_escape }}
+\cvjobtitle{\VAR{ facts.identity.title | tex_escape }}
+\cvprofilepic{pics/PIC_SQR.png}
+\cvbirthday{\VAR{ facts.identity.birthdate | tex_escape }}
+\cvaddress{\VAR{ facts.identity.address | tex_escape }}
+\cvphone{\VAR{ facts.identity.phone | tex_escape }}
+\cvsite{\VAR{ facts.identity.linkedin | tex_escape }}
+\cvcustomdata{\faGithub}{\href{\VAR{ facts.identity.github | tex_escape }}{afeefkt.github.io}}
+\cvmail{\VAR{ facts.identity.email | tex_escape }}
+\cvcustomdata{\faFlag}{\VAR{ facts.identity.nationality | tex_escape }}
+
+\addtofrontsidebar{
+	\graphicspath{{pics/flags/}}
+    \profilesection{About Me}
+	\aboutme{
+		\VAR{ facts.identity.about | tex_escape }
+	}
+	\profilesection{Languages}
+\BLOCK{ for lang in facts.languages }
+\BLOCK{ if lang.lang == 'English' }
+        \pointskill{\faLanguage}{\VAR{ lang.lang | tex_escape }}{5}
+\BLOCK{ elif lang.lang == 'German' }
+		\pointskill{\flag{DE.png}}{\VAR{ lang.lang | tex_escape }(\VAR{ lang.level | tex_escape })}{3}
+\BLOCK{ endif }
+\BLOCK{ endfor }
+
+	\profilesection{Skills}
+\BLOCK{ for skill in matched_skills }
+        \barskill{}{\VAR{ skill | tex_escape }}{90}
+\BLOCK{ endfor }
+\BLOCK{ for skill in other_skills }
+        \barskill{}{\VAR{ skill | tex_escape }}{50}
+\BLOCK{ endfor }
+}
+
+\addtobacksidebar{
+	\profilesection{About Me}
+	\aboutme{
+		\VAR{ facts.identity.about | tex_escape }
+	}
+	\profilesection{Key Skills}
+	\begin{sidebarminipage}
+\BLOCK{ for skill in matched_skills[:8] }
+		\chartlabel{\VAR{ skill | tex_escape }}
+\BLOCK{ endfor }
+	\end{sidebarminipage}
+}
+
+\begin{document}
+\makefrontsidebar
+
+\cvsection{Relevant Experience}
+\begin{cvtable}[2]
+\#{ One cvitem per ROLE. Iterating bullets here instead would repeat the role }
+\#{ header once per bullet and scramble the chronology. }
+\BLOCK{ for role in role_groups }
+    \cvitem{\VAR{ role.dates | tex_escape }}{\VAR{ role.role_title | tex_escape } \\\VAR{ role.org | tex_escape }\BLOCK{ if role.location } | \VAR{ role.location | tex_escape }\BLOCK{ endif }}{\VAR{ role.duration | tex_escape }}{
+\BLOCK{ for bullet in role.bullets }
+    \\\textbullet{} \VAR{ bullet.text | tex_escape }
+\BLOCK{ endfor }
+    }
+\BLOCK{ endfor }
+\end{cvtable}
+
+\BLOCK{ if facts.education }
+\cvsection{Education}
+\begin{cvtable}[1.5]
+\BLOCK{ for edu in facts.education }
+	\cvitem{\VAR{ edu.years | tex_escape }}{\VAR{ edu.degree | tex_escape }}{\VAR{ edu.institution | tex_escape }}
+		{\BLOCK{ if edu.focus }Focus: \VAR{ edu.focus | tex_escape }\BLOCK{ endif }}
+\BLOCK{ endfor }
+\end{cvtable}
+\BLOCK{ endif }
+
+\BLOCK{ if facts.awards }
+\cvsection{Awards}
+\begin{cvtable}
+\BLOCK{ for award in facts.awards }
+	\cvitem{\VAR{ award.year | tex_escape }}{\VAR{ award.title | tex_escape }}{\VAR{ award.org | tex_escape }}{\VAR{ award.description | tex_escape }}
+\BLOCK{ endfor }
+\end{cvtable}
+\BLOCK{ endif }
+
+\cvsignature
+
+\end{document}

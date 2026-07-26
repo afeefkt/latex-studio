@@ -1,0 +1,30 @@
+# ── hooks.example.yaml ──────────────────────────────────────────────────────
+# Copy this to hooks.yaml and rewrite the prose in your own voice.
+# Available slots: {company_name}  {role_title}  {focus_phrase}
+# Keep each hook to 1-2 sentences — it is the first thing the reader sees.
+
+exact_match: >-
+  Your posting for the {role_title} role asks for {focus_phrase}. That has been the
+  centre of my work for the last several years, and the projects below are where I
+  have done it.
+
+domain_transfer: >-
+  I have spent my career solving control and embedded software problems across
+  automotive and aerospace, and what {company_name} is building runs on the same
+  engineering in a different package. The overlap with {focus_phrase} is where I
+  think I would be most useful.
+
+rare_combination: >-
+  Engineers working on {focus_phrase} usually come from either the modelling side or
+  the production-code side. I have worked on both ends of that toolchain, which is
+  what drew me to the {role_title} role at {company_name}.
+
+adjacent_expertise: >-
+  My background is not a line-for-line match to the {role_title} posting, but it is
+  closely adjacent: {focus_phrase} sits right next to the work I have been doing, and
+  the transferable part is substantial.
+
+self_taught: >-
+  I came to {focus_phrase} by teaching myself and then proving it on production
+  projects rather than through formal training. The {role_title} role at
+  {company_name} is where I would like to take that next.

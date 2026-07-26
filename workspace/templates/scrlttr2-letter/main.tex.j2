@@ -1,0 +1,51 @@
+\documentclass[
+  fromalign=right,
+  fromrule=afteraddress,
+  fromphone=true,
+  fromemail=true,
+  parskip=half,
+  enlargefirstpage=on,
+  firstfoot=false,
+  pagenumber=no,
+  foldmarks=off,
+]{scrlttr2}
+
+\usepackage{fontspec}
+\usepackage[english]{babel}
+\usepackage{hyperref}
+
+\setkomavar{fromname}{\VAR{ sender_name | tex_escape }}
+\setkomavar{fromaddress}{\VAR{ sender_address | tex_escape }}
+\setkomavar{fromemail}{\VAR{ sender_email | tex_escape }}
+\setkomavar{fromphone}{\VAR{ sender_phone | tex_escape }}
+
+\setkomavar{subject}{\VAR{ subject | tex_escape }}
+
+\begin{document}
+
+\begin{letter}{
+  \VAR{ recipient_name | tex_escape } \\
+  \VAR{ recipient_company | tex_escape } \\
+  \VAR{ recipient_address | tex_escape }
+}
+
+\opening{\VAR{ opening | tex_escape }}
+
+\#{ Opening hook. Prose from workspace/hooks.yaml, selected via the validated }
+\#{ hook_key. Already LaTeX-escaped in content.py -- do NOT tex_escape again. }
+\BLOCK{ if hook_text }
+\VAR{ hook_text }
+
+\BLOCK{ endif }
+\BLOCK{ if selected_bullets }
+\BLOCK{ for bullet in selected_bullets }
+\VAR{ bullet.text | tex_escape }
+
+\BLOCK{ endfor }
+\BLOCK{ endif }
+I would be glad to walk through any of this in more detail, and I can arrange a call at short notice.
+
+\closing{\VAR{ closing | tex_escape }}
+
+\end{letter}
+\end{document}

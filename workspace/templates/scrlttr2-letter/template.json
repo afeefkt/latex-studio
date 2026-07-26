@@ -1,0 +1,15 @@
+{
+  "name": "Cover Letter",
+  "kind": "letter",
+  "description": "KOMA-Script scrlttr2 cover letter with hook opener.",
+  "variables": {
+    "opening": "Dear Hiring Team,",
+    "closing": "Yours sincerely,",
+    "recipient_name": "Hiring Manager",
+    "recipient_company": "",
+    "recipient_address": "",
+    "subject": "Application",
+    "hook_text": "",
+    "selected_bullets": []
+  }
+}

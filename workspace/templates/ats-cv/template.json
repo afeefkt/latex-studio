@@ -1,0 +1,6 @@
+{
+  "name": "ATS CV",
+  "kind": "cv",
+  "description": "Clean single-column CV for ATS systems and company portals.",
+  "channel": "ats"
+}
