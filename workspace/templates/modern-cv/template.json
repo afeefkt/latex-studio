@@ -1,0 +1,10 @@
+{
+  "name": "Modern CV",
+  "kind": "cv",
+  "layout": "designed",
+  "icon": "✨",
+  "colour": "#89b4fa",
+  "description": "Clean modern layout with color accents, icon contacts, and clear section hierarchy. Works for both portal and email.",
+  "requires": ["identity", "roles", "skills", "education", "languages", "awards"],
+  "variables": {}
+}

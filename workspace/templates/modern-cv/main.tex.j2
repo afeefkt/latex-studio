@@ -1,0 +1,97 @@
+% ── Modern CV — clean scrartcl template with color accents ──
+\documentclass[a4paper,11pt]{scrartcl}
+
+\usepackage[left=22mm, right=22mm, top=18mm, bottom=18mm]{geometry}
+\usepackage{fontspec}
+\usepackage[english]{babel}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{fontawesome5}
+
+\definecolor{accent}{HTML}{2B579A}
+\definecolor{dark}{HTML}{333333}
+\definecolor{gray}{HTML}{666666}
+\definecolor{lightgray}{HTML}{DDDDDD}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlist{nosep,leftmargin=*}
+
+\titleformat{\section}
+  {\color{accent}\normalfont\Large\bfseries}
+  {}{0pt}
+  {\color{accent}\rule[2pt]{\textwidth}{1.4pt}\\[-2pt]}[\vspace{4pt}]
+
+\titlespacing{\section}{0pt}{16pt}{6pt}
+
+\begin{document}
+
+% ── Header block ──
+\begin{center}
+  {\Huge\bfseries\color{accent} \VAR{ facts.identity.name | tex_escape }} \\[4pt]
+  {\large \VAR{ facts.identity.title | tex_escape }} \\[8pt]
+  \small
+  \faEnvelope\ \VAR{ facts.identity.email | tex_escape } \hspace{2em}
+  \faPhone\ \VAR{ facts.identity.phone | tex_escape } \hspace{2em}
+  \faMapMarker\ \VAR{ facts.identity.location | tex_escape } \\[4pt]
+  \faLinkedin\ \href{\VAR{ facts.identity.linkedin | tex_escape }}{LinkedIn} \hspace{2em}
+  \faGithub\ \href{\VAR{ facts.identity.github | tex_escape }}{GitHub}
+\end{center}
+
+\vspace{4pt}
+{\color{accent}\hrule height 1.4pt}
+\vspace{2pt}
+{\color{accent!40}\hrule height 0.6pt}
+
+% ── Professional Summary ──
+\section{Professional Summary}
+\VAR{ facts.identity.about | tex_escape }
+
+% ── Work Experience ──
+\section{Work Experience}
+\BLOCK{ for role in facts.roles }
+\textbf{\VAR{ role.title | tex_escape }} \textbar{} \VAR{ role.org | tex_escape } \hfill \VAR{ role.dates | tex_escape } \\
+\BLOCK{ if role.location }\textit{\VAR{ role.location | tex_escape }} \\
+\BLOCK{ endif }
+\begin{itemize}
+\BLOCK{ for bullet in role.bullets }
+  \item \VAR{ bullet.text | tex_escape }
+\BLOCK{ endfor }
+\end{itemize}
+\medskip
+\BLOCK{ endfor }
+
+% ── Skills ──
+\section{Skills}
+\textbf{Expert:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\[4pt]
+\textbf{Proficient:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\[4pt]
+\textbf{Familiar:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
+
+% ── Education ──
+\section{Education}
+\BLOCK{ for edu in facts.education }
+\textbf{\VAR{ edu.degree | tex_escape }} — \VAR{ edu.institution | tex_escape } \hfill \VAR{ edu.years | tex_escape } \\
+\BLOCK{ if edu.focus }
+\small \VAR{ edu.focus | tex_escape }
+\BLOCK{ endif }
+\medskip
+\BLOCK{ endfor }
+
+% ── Languages ──
+\section{Languages}
+\BLOCK{ for lang in facts.languages }
+\VAR{ lang.lang | tex_escape } (\VAR{ lang.level | tex_escape })\BLOCK{ if not loop.last } \textbar{} \BLOCK{ endif }
+\BLOCK{ endfor }
+
+\BLOCK{ if facts.awards }
+\section{Awards}
+\BLOCK{ for award in facts.awards }
+\textbf{\VAR{ award.title | tex_escape }} \hfill \VAR{ award.year | tex_escape } \\
+\VAR{ award.org | tex_escape } \\
+\small \VAR{ award.description | tex_escape }
+\BLOCK{ endfor }
+\BLOCK{ endif }
+
+\end{document}
