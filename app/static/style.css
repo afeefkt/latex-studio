@@ -830,6 +830,16 @@ kbd {
 
 .app-empty { text-align: center; color: var(--text-dim); padding: 40px 20px; font-size: 14px; }
 
+/* ── Letter preview ──────────────────────────────────────────────────────── */
+.letter-preview-textarea {
+  width: 100%; min-height: 250px; resize: vertical;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 14px; color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px; line-height: 1.8;
+}
+.letter-preview-textarea:focus { outline: none; border-color: var(--accent); }
+
 /* ── Scrollbar styling ───────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

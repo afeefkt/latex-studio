@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.compile import compile_doc
 from app.docs import create_document, load_facts, render_template, tex_escape
 from app.guard.factbank import load_factbank
-from app.guard.validator import validate_tailor_response
+from app.guard.validator import validate_assembled_text, validate_tailor_response
 from app.llm.provider import get_provider
 from app.tracker import log_application, update_latest_cv
 
@@ -326,6 +326,7 @@ async def tailor_letter(body: TailorRequest):
                 'company_name': company_name,
                 'role_title': role_title,
                 'letter_preview': letter_tex[:500],
+                'assembled_body': assembled_body,
                 'focus_phrase': focus_phrase,
                 'hook_key': hook_key,
                 'selected_bullet_ids': tailor_data.get('selected_bullet_ids', []),
@@ -371,6 +372,7 @@ class GenerateRequest(BaseModel):
     unmatched: list[str] = []
     matched_count: int = 0
     notes: str = ""
+    edited_body: str | None = None           # Hand-edited letter body from preview step
 
 
 def _slugify(text: str, fallback: str) -> str:
@@ -436,7 +438,8 @@ async def generate_documents(body: GenerateRequest):
         "subject": f"Application for {role}",
         "opening": f"Dear Hiring Team at {company},",
         "closing": "Sincerely,",
-        "selected_bullets": bullet_texts,
+        "edited_body": body.edited_body,
+        "selected_bullets": bullet_texts if not body.edited_body else [],
         "company_name": company,
         "role_title": role,
         "focus_phrase": body.focus_phrase,
@@ -554,6 +557,33 @@ def _get_bullet_texts(facts: dict, bullet_ids: list[str]) -> list[dict]:
         if bid in bullet_map:
             result.append(bullet_map[bid])
     return result
+
+
+# ── Preview / guard check for hand-edited text ──────────────────────────────────
+
+class PreviewCheckRequest(BaseModel):
+    assembled_text: str
+    job_ad_text: str
+
+
+@router.post("/preview-check")
+async def preview_check(body: PreviewCheckRequest):
+    """Run guard rules 5-9 on hand-edited letter text. Returns pass/fail + issues."""
+    factbank = load_factbank()
+    validation = validate_assembled_text(
+        body.assembled_text, body.job_ad_text, factbank,
+    )
+    return {
+        "passed": validation.passed,
+        "errors": [
+            {"rule": e.rule, "message": e.message, "detail": e.detail}
+            for e in validation.errors
+        ],
+        "warnings": [
+            {"rule": w.rule, "message": w.message, "detail": w.detail}
+            for w in validation.warnings
+        ],
+    }
 
 
 def yaml_dump_facts(facts: dict) -> str:

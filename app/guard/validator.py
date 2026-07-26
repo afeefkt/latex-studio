@@ -314,3 +314,30 @@ def _rule_9_certifications(text: str, facts: FactBank, errors: list) -> None:
                     message=f"Unverified certification/degree claim: '{cert_name}'",
                     detail="This certification is not listed in facts.yaml",
                 ))
+
+
+# ── Pass 2 only: validate assembled text (rules 5-9, no schema check) ──────────
+
+def validate_assembled_text(
+    text: str,
+    job_ad_text: str,
+    facts: FactBank | None = None,
+) -> ValidationResult:
+    """Run guard rules 5-9 on assembled letter text. For preview/edit flows."""
+    if facts is None:
+        facts = load_factbank()
+
+    errors: list[ValidationIssue] = []
+    warnings: list[ValidationIssue] = []
+
+    _rule_5_banned_claims(text, facts, errors)
+    _rule_6_numbers(text, facts, errors)
+    _rule_7_entities(text, facts, job_ad_text, warnings)
+    _rule_8_length(text, warnings)
+    _rule_9_certifications(text, facts, errors)
+
+    return ValidationResult(
+        passed=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+    )

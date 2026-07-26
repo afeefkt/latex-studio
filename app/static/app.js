@@ -1016,7 +1016,78 @@ function renderFitReport(d) {
     html += `<div class="fit-notes">💡 ${escapeHTML(d.notes)}</div>`;
   }
 
+  // Add editable letter preview
+  if (d.assembled_body) {
+    html += `
+      <div class="letter-preview-section" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+        <div class="fit-section-title">📝 Preview & Edit Letter Body</div>
+        <textarea id="letter-preview-textarea" class="letter-preview-textarea">${escapeHTML(d.assembled_body)}</textarea>
+        <div class="apply-actions" style="margin-top:10px">
+          <button id="btn-reset-preview" class="btn-ghost">Reset to generated</button>
+          <button id="btn-generate-from-preview" class="btn-primary" disabled style="opacity:0.5">Check & Generate →</button>
+        </div>
+        <div id="preview-guard-status" style="margin-top:8px;font-size:12px"></div>
+      </div>`;
+  }
+
   fitReport.innerHTML = html;
+
+  // Wire preview buttons
+  const previewTextarea = $("letter-preview-textarea");
+  const btnResetPreview = $("btn-reset-preview");
+  const btnGenerateFromPreview = $("btn-generate-from-preview");
+  const previewGuardStatus = $("preview-guard-status");
+
+  if (previewTextarea && d.assembled_body) {
+    // Enable generate button immediately (guard check runs on click)
+    btnGenerateFromPreview.disabled = false;
+    btnGenerateFromPreview.style.opacity = "1";
+
+    btnResetPreview.addEventListener("click", () => {
+      previewTextarea.value = d.assembled_body;
+      previewGuardStatus.innerHTML = "";
+    });
+
+    btnGenerateFromPreview.addEventListener("click", async () => {
+      const editedText = previewTextarea.value.trim();
+      btnGenerateFromPreview.disabled = true;
+      btnGenerateFromPreview.textContent = "Checking...";
+      previewGuardStatus.innerHTML = '<span class="spinner"></span> Checking against fact bank...';
+
+      try {
+        const resp = await fetch("/api/content/preview-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            assembled_text: editedText,
+            job_ad_text: $("jd-textarea").value || "",
+          }),
+        });
+        const checkResult = await resp.json();
+
+        if (!checkResult.passed) {
+          const errLines = checkResult.errors.map(e =>
+            `<span style="color:var(--error)">R${e.rule}: ${e.message}</span>`
+          ).join("<br>");
+          previewGuardStatus.innerHTML = `<span class="apply-err">Blocked by the fact guard.<br>${errLines}</span>`;
+          btnGenerateFromPreview.textContent = "Check & Generate →";
+          btnGenerateFromPreview.disabled = false;
+          return;
+        }
+
+        // Guard passed — proceed with generate using channel buttons
+        // Store edited text in tailorResultData so generateDocs picks it up
+        tailorResultData = { ...tailorResultData, edited_body: editedText };
+        previewGuardStatus.innerHTML = '<span class="apply-ok">✓ Guard passed — select a channel below to generate</span>';
+        btnGenerateFromPreview.textContent = "✓ Ready";
+        applyStep3.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (e) {
+        previewGuardStatus.innerHTML = `<span class="apply-err">Check failed: ${e.message}</span>`;
+        btnGenerateFromPreview.textContent = "Check & Generate →";
+        btnGenerateFromPreview.disabled = false;
+      }
+    });
+  }
 }
 
 // ── Apply view: generate the documents ────────────────────────────────────────
@@ -1048,6 +1119,7 @@ async function generateDocs(channel) {
         unmatched: d.unmatched || [],
         matched_count: (d.matched || []).length,
         notes: d.notes || "",
+        edited_body: d.edited_body || null,
       }),
     });
 

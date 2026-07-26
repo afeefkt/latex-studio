@@ -31,13 +31,13 @@
 
 \opening{\VAR{ opening | tex_escape }}
 
-\#{ Opening hook. Prose from workspace/hooks.yaml, selected via the validated }
-\#{ hook_key. Already LaTeX-escaped in content.py -- do NOT tex_escape again. }
 \BLOCK{ if hook_text }
 \VAR{ hook_text }
 
 \BLOCK{ endif }
-\BLOCK{ if selected_bullets }
+\BLOCK{ if edited_body }
+\VAR{ edited_body | tex_escape }
+\BLOCK{ elif selected_bullets }
 \BLOCK{ for bullet in selected_bullets }
 \VAR{ bullet.text | tex_escape }
 
