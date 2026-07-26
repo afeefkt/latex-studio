@@ -14,16 +14,21 @@ from pydantic import BaseModel
 from app.compile import compile_doc
 from app.docs import (
     create_document,
+    create_profile,
     delete_document,
+    get_active_profile,
     init_workspace,
     list_doc_files,
     list_documents,
     list_templates,
     load_facts,
+    load_profiles,
     pdf_path,
     read_file,
     render_template,
     save_facts,
+    save_profiles,
+    set_active_profile,
     write_file,
 )
 from app.importer import import_to_facts
@@ -258,6 +263,45 @@ async def get_pdf(doc_path: str):
 @app.get("/api/git/{doc_path:path}")
 async def git_log(doc_path: str):
     return {"commits": docs.git_log(doc_path)}
+
+
+# ── Profiles ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/profiles")
+async def list_profiles_endpoint():
+    """List all profiles and the currently active one."""
+    return {
+        "profiles": load_profiles(),
+        "active": get_active_profile(),
+    }
+
+
+class ProfileBody(BaseModel):
+    name: str
+
+
+@app.post("/api/profiles")
+async def create_profile_endpoint(body: ProfileBody):
+    """Create a new profile."""
+    try:
+        profile = create_profile(body.name)
+        return {"created": True, "profile": profile}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class SwitchProfileBody(BaseModel):
+    id: str
+
+
+@app.post("/api/profiles/switch")
+async def switch_profile_endpoint(body: SwitchProfileBody):
+    """Switch to a different profile."""
+    profiles = load_profiles()
+    if not any(p["id"] == body.id for p in profiles):
+        raise HTTPException(404, f"Profile '{body.id}' not found")
+    set_active_profile(body.id)
+    return {"active": body.id, "message": f"Switched to profile '{body.id}'"}
 
 
 # ── Applications tracker ───────────────────────────────────────────────────────

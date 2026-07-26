@@ -1557,7 +1557,83 @@ chatResizeHandle.addEventListener("mousedown", (e) => {
   document.addEventListener("mouseup", onUp);
 });
 
+// ── Profiles ──────────────────────────────────────────────────────────────────
+
+const profileSelect  = $("profile-select");
+const btnNewProfile  = $("btn-new-profile");
+
+async function loadProfiles() {
+  try {
+    const resp = await fetch("/api/profiles");
+    const data = await resp.json();
+    const profiles = data.profiles || [];
+    profileSelect.innerHTML = profiles.map(p =>
+      `<option value="${p.id}" ${p.id === data.active ? "selected" : ""}>${p.name}</option>`
+    ).join("");
+    if (!profiles.length) {
+      profileSelect.innerHTML = '<option value="">Default</option>';
+    }
+  } catch (e) {
+    console.warn("Could not load profiles:", e);
+  }
+}
+
+profileSelect.addEventListener("change", async () => {
+  const id = profileSelect.value;
+  if (!id) return;
+  try {
+    await fetch("/api/profiles/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    await loadDocList();
+    if (currentDoc) {
+      await switchDocument(currentDoc.path, currentDoc.kind);
+    } else {
+      try {
+        const resp = await fetch("/api/docs");
+        const data = await resp.json();
+        const docs = data.documents;
+        const cvDoc = docs.find(d => d.path === "cv");
+        if (cvDoc) await switchDocument("cv", "cv");
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.error("Profile switch failed:", e);
+  }
+});
+
+btnNewProfile.addEventListener("click", async () => {
+  const name = prompt("New profile name (e.g. 'Aerospace CV'):");
+  if (!name || !name.trim()) return;
+  try {
+    const resp = await fetch("/api/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      alert("Could not create profile: " + err);
+      return;
+    }
+    const data = await resp.json();
+    await fetch("/api/profiles/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: data.profile.id }),
+    });
+    await loadProfiles();
+    await loadDocList();
+    setStatus("idle");
+  } catch (e) {
+    console.error("Profile creation failed:", e);
+  }
+});
+
 (async function init() {
+  await loadProfiles();
   await loadDocList();
   try {
     const resp = await fetch("/api/docs");

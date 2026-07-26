@@ -7,13 +7,79 @@ from pathlib import Path
 import jinja2
 import yaml
 
-WORKSPACE = Path(__file__).parent.parent / "workspace"
-TEMPLATES = WORKSPACE / "templates"
-FACTS_PATH = WORKSPACE / "facts.yaml"
+# ── Profile-aware workspace paths ──────────────────────────────────────────────
 
-# Per-document git storage — keep metadata outside workspace tree
-# to avoid nested .git dirs being treated as submodules by the parent repo.
-DOCGIT_DIR = WORKSPACE.parent / ".docgit"
+BASE_WORKSPACE = Path(__file__).parent.parent / "workspace"
+_active_profile: str | None = None
+
+# Workspace, facts, and per-doc git paths shift with the active profile.
+# Templates and the Jinja loader stay at BASE level (shared across profiles).
+WORKSPACE = BASE_WORKSPACE
+TEMPLATES = BASE_WORKSPACE / "templates"
+FACTS_PATH = BASE_WORKSPACE / "facts.yaml"
+DOCGIT_DIR = BASE_WORKSPACE.parent / ".docgit"
+PROFILES_JSON = BASE_WORKSPACE / "profiles.json"
+
+
+def get_active_profile() -> str | None:
+    return _active_profile
+
+
+def set_active_profile(profile: str | None) -> None:
+    """Switch the active profile. All file ops (facts, docs, letters) follow."""
+    global _active_profile, WORKSPACE, FACTS_PATH, DOCGIT_DIR
+    _active_profile = profile
+    if profile:
+        WORKSPACE = BASE_WORKSPACE / profile
+    else:
+        WORKSPACE = BASE_WORKSPACE
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    FACTS_PATH = WORKSPACE / "facts.yaml"
+    DOCGIT_DIR = WORKSPACE.parent / ".docgit"
+
+
+def _ensure_default_profile() -> None:
+    """Create a default profile + facts.example if no profiles exist."""
+    PROFILES_JSON.parent.mkdir(parents=True, exist_ok=True)
+    if not PROFILES_JSON.exists():
+        # Seed with a 'default' profile
+        save_profiles([{"id": "default", "name": "Default"}])
+    profiles = load_profiles()
+    if profiles and not _active_profile:
+        set_active_profile(profiles[0]["id"])
+
+
+def load_profiles() -> list[dict]:
+    if not PROFILES_JSON.exists():
+        return []
+    return json.loads(PROFILES_JSON.read_text(encoding="utf-8"))
+
+
+def save_profiles(profiles: list[dict]) -> None:
+    PROFILES_JSON.parent.mkdir(parents=True, exist_ok=True)
+    PROFILES_JSON.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+
+
+def create_profile(name: str) -> dict:
+    """Create a new profile directory and add to profiles.json."""
+    clean = name.strip().lower().replace(" ", "_")[:30]
+    if not clean:
+        raise ValueError("Profile name is required")
+    profiles = load_profiles()
+    if any(p["id"] == clean for p in profiles):
+        raise ValueError(f"Profile '{clean}' already exists")
+    profile = {"id": clean, "name": name.strip()}
+    profiles.append(profile)
+    save_profiles(profiles)
+    # Create the profile workspace directory
+    (BASE_WORKSPACE / clean).mkdir(parents=True, exist_ok=True)
+    (BASE_WORKSPACE / clean / "letters").mkdir(parents=True, exist_ok=True)
+    # Copy facts.example.yaml as starter facts if no facts.yaml exists
+    example = BASE_WORKSPACE / "facts.example.yaml"
+    target = BASE_WORKSPACE / clean / "facts.yaml"
+    if example.exists() and not target.exists():
+        target.write_text(example.read_text(encoding="utf-8"))
+    return profile
 
 
 def _git_dir(doc_path: str) -> Path:
@@ -268,10 +334,10 @@ def pdf_path(doc_path: str) -> Path:
 # ── Workspace init ────────────────────────────────────────────────────────────
 
 def init_workspace() -> None:
-    """Ensure workspace and required sub-directories exist."""
-    WORKSPACE.mkdir(exist_ok=True)
+    """Ensure workspace and required sub-directories exist; seed default profile."""
+    BASE_WORKSPACE.mkdir(exist_ok=True)
     TEMPLATES.mkdir(exist_ok=True)
-    (WORKSPACE / "letters").mkdir(exist_ok=True)
+    _ensure_default_profile()
 
 
 # ── Document listing ──────────────────────────────────────────────────────────

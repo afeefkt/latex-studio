@@ -869,6 +869,27 @@ kbd {
 .view-btn:hover { color: var(--text); }
 .view-btn.active { background: var(--accent); color: var(--bg); }
 
+/* ── Profile picker ───────────────────────────────────────────────────────── */
+#profile-select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 130px;
+}
+#profile-select:focus { outline: none; border-color: var(--accent); }
+#btn-new-profile {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 5px;
+  cursor: pointer;
+}
+#btn-new-profile:hover { color: var(--text); border-color: var(--accent); }
+
 /* ── Apply view ──────────────────────────────────────────────────────────── */
 #apply-view {
   position: absolute;
