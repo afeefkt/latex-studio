@@ -31,3 +31,11 @@ Thumbs.db
 
 # Env
 .env
+
+# User data — never tracked (except templates)
+workspace/
+!workspace/templates/
+!workspace/templates/**
+
+# Per-document git metadata (auto-commit)
+.docgit/

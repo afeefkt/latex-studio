@@ -28,6 +28,7 @@ class CompileError:
     line: int | None
     message: str
     kind: str = "error"
+    translated: str = ""
 
 
 @dataclass
@@ -38,6 +39,37 @@ class CompileResult:
     warnings: list[CompileError] = field(default_factory=list)
     log: str = ""
     git_committed: bool = False
+
+
+# ── Plain-English error translations ───────────────────────────────────────────
+
+ERROR_TRANSLATIONS: list[tuple[str, str]] = [
+    (r"Undefined control sequence", "A command the template doesn't know"),
+    (r"Misplaced alignment tab character &", "An unescaped & — use \\& instead"),
+    (r"File .* not found", "A file or package the template needs is missing"),
+    (r"Emergency stop", "A fatal error stopped compilation"),
+    (r"Overfull \\\\hbox", "A line ran past the margin (cosmetic)"),
+    (r"Underfull \\\\hbox", "Extra spacing warning (cosmetic)"),
+    (r"LaTeX Error: Unknown option", "An option this class doesn't recognise"),
+    (r"No pages of output", "The document produced no pages — check \\begin{document}"),
+    (r"Missing \\\\begin", "A section or environment wasn't closed properly"),
+    (r"There's no line here to end", "An extra \\\\ or \\newline without content"),
+    (r"Too many \\}", "Extra closing brace somewhere"),
+    (r"Paragraph ended before", "A command expected an argument but got a blank line"),
+    (r"Missing number", "A command expected a number argument but got text"),
+    (r"Display math should end", "Unclosed math mode — check for missing \\]"),
+    (r"Runaway argument", "An unclosed brace in a command argument"),
+    (r"Float\(s\) lost", "A figure or table couldn't be placed"),
+    (r"I can't find file", "A file referenced in the document doesn't exist"),
+    (r"Unknown option", "An option this document class or package doesn't recognise"),
+]
+
+
+def _translate_error(message: str) -> str:
+    for pattern, translation in ERROR_TRANSLATIONS:
+        if re.search(pattern, message, re.IGNORECASE):
+            return translation
+    return ""
 
 
 def _parse_log(log_text: str) -> tuple[list[CompileError], list[CompileError]]:
@@ -100,17 +132,27 @@ def _parse_log(log_text: str) -> tuple[list[CompileError], list[CompileError]]:
             )
         )
 
+    # Add plain-English translations to all errors and warnings
+    for e in errors:
+        e.translated = _translate_error(e.message)
+    for w in warnings:
+        w.translated = _translate_error(w.message)
+
     return errors, warnings
 
 
-def _git_commit(src_dir: Path) -> bool:
+def _git_commit(src_dir: Path, doc_path: str = "") -> bool:
     """Auto-commit the document folder on successful compile. Returns True if committed."""
     try:
-        git_dir = src_dir / ".git"
-        if not git_dir.exists():
+        import app.docs as _docs
+        gd = _docs._git_dir(doc_path or src_dir.name)
+        work_tree = str(src_dir)
+        git_dir_str = str(gd)
+
+        if not gd.exists():
             subprocess.run(
-                ["git", "init"],
-                capture_output=True, text=True, cwd=str(src_dir), timeout=15,
+                ["git", "--git-dir", git_dir_str, "--work-tree", work_tree, "init"],
+                capture_output=True, text=True, timeout=15,
             )
             (src_dir / ".gitignore").write_text(
                 ".build/\nout.pdf\n*.aux\n*.log\n*.out\n*.synctex*\n*.fdb_latexmk\n*.fls\n",
@@ -118,20 +160,21 @@ def _git_commit(src_dir: Path) -> bool:
             )
 
         subprocess.run(
-            ["git", "add", "-A"],
-            capture_output=True, text=True, cwd=str(src_dir), timeout=15,
+            ["git", "--git-dir", git_dir_str, "--work-tree", work_tree, "add", "-A"],
+            capture_output=True, text=True, timeout=15,
         )
 
         status = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"],
-            capture_output=True, cwd=str(src_dir), timeout=15,
+            ["git", "--git-dir", git_dir_str, "diff", "--cached", "--quiet"],
+            capture_output=True, timeout=15,
         )
         if status.returncode == 0:
             return False
 
         subprocess.run(
-            ["git", "commit", "-m", "auto: successful compile"],
-            capture_output=True, text=True, cwd=str(src_dir), timeout=15,
+            ["git", "--git-dir", git_dir_str, "--work-tree", work_tree,
+             "commit", "-m", "auto: successful compile"],
+            capture_output=True, text=True, timeout=15,
         )
         return True
     except Exception:
@@ -200,7 +243,7 @@ async def compile_doc(doc_path: str) -> CompileResult:
     if returncode == 0 and pdf_candidate.exists():
         stable_pdf = src_dir / "out.pdf"
         shutil.copy2(pdf_candidate, stable_pdf)
-        committed = await asyncio.to_thread(_git_commit, src_dir)
+        committed = await asyncio.to_thread(_git_commit, src_dir, doc_path)
         return CompileResult(
             success=True, pdf_path=stable_pdf, errors=errors, warnings=warnings,
             log=log_text, git_committed=committed,

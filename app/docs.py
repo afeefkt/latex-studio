@@ -11,6 +11,17 @@ WORKSPACE = Path(__file__).parent.parent / "workspace"
 TEMPLATES = WORKSPACE / "templates"
 FACTS_PATH = WORKSPACE / "facts.yaml"
 
+# Per-document git storage — keep metadata outside workspace tree
+# to avoid nested .git dirs being treated as submodules by the parent repo.
+DOCGIT_DIR = WORKSPACE.parent / ".docgit"
+
+
+def _git_dir(doc_path: str) -> Path:
+    slug = doc_path.replace("/", "-").replace("\\", "-").strip("-")
+    d = DOCGIT_DIR / slug
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 
 # ── Jinja2 environment for template rendering ──────────────────────────────────
 
@@ -308,20 +319,18 @@ def git_commit(doc_path: str, message: str = "Auto-commit after successful compi
     doc_dir = WORKSPACE / doc_path
     if not doc_dir.exists():
         return
+    gd = _git_dir(doc_path)
+    work_tree = str(doc_dir)
+    git_dir_str = str(gd)
     try:
         subprocess.run(
-            ["git", "add", "."],
-            cwd=str(doc_dir),
-            capture_output=True,
-            timeout=10,
-            check=False,
+            ["git", "--git-dir", git_dir_str, "--work-tree", work_tree, "add", "-A"],
+            capture_output=True, timeout=10, check=False,
         )
         subprocess.run(
-            ["git", "commit", "-m", message, "--allow-empty"],
-            cwd=str(doc_dir),
-            capture_output=True,
-            timeout=10,
-            check=False,
+            ["git", "--git-dir", git_dir_str, "--work-tree", work_tree,
+             "commit", "-m", message, "--allow-empty"],
+            capture_output=True, timeout=10, check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
@@ -332,14 +341,15 @@ def git_log(doc_path: str, max_count: int = 20) -> list[dict]:
     doc_dir = WORKSPACE / doc_path
     if not doc_dir.exists():
         return []
+    gd = _git_dir(doc_path)
+    if not gd.exists():
+        return []
+    git_dir_str = str(gd)
     try:
         result = subprocess.run(
-            ["git", "log", f"--max-count={max_count}", "--format=%H%n%ai%n%s"],
-            cwd=str(doc_dir),
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
+            ["git", "--git-dir", git_dir_str,
+             "log", f"--max-count={max_count}", "--format=%H%n%ai%n%s"],
+            capture_output=True, text=True, timeout=5, check=False,
         )
         commits = []
         parts = result.stdout.strip().split("\n\n")
@@ -348,11 +358,7 @@ def git_log(doc_path: str, max_count: int = 20) -> list[dict]:
                 continue
             lines = block.strip().split("\n")
             if len(lines) >= 3:
-                commits.append({
-                    "hash": lines[0][:7],
-                    "date": lines[1],
-                    "message": "\n".join(lines[2:]),
-                })
+                commits.append({"hash": lines[0][:7], "date": lines[1], "message": "\n".join(lines[2:])})
         return commits
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []
@@ -363,16 +369,17 @@ def git_init(doc_path: str) -> None:
     doc_dir = WORKSPACE / doc_path
     if not doc_dir.exists():
         return
-    git_dir = doc_dir / ".git"
-    if git_dir.exists():
-        return
+    gd = _git_dir(doc_path)
+    work_tree = str(doc_dir)
+    git_dir_str = str(gd)
     try:
         subprocess.run(
-            ["git", "init"],
-            cwd=str(doc_dir),
-            capture_output=True,
-            timeout=5,
-            check=False,
+            ["git", "--git-dir", git_dir_str, "--work-tree", work_tree, "init"],
+            capture_output=True, timeout=5, check=False,
+        )
+        (doc_dir / ".gitignore").write_text(
+            ".build/\nout.pdf\n*.aux\n*.log\n*.out\n*.synctex*\n*.fdb_latexmk\n*.fls\n",
+            encoding="utf-8",
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
