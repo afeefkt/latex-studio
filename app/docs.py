@@ -129,7 +129,11 @@ def load_facts() -> dict:
     """Load and return the facts.yaml content. Returns {} if missing."""
     if not FACTS_PATH.exists():
         return {}
-    return yaml.safe_load(FACTS_PATH.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(FACTS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def save_facts(data: dict) -> None:

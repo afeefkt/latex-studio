@@ -28,50 +28,74 @@
 	bubble fill opacity = 0.8,
 }
 
+% The class builds \cvitem's title with a plain \parbox, which centres it
+% vertically. A role whose title plus employer wraps to two lines then floats
+% its first line above its own date row -- "Embedded Software/Test Engineer"
+% ends up sitting in the previous entry. Redefined here with [t] so it top-
+% aligns like the date column; otherwise identical to the class version.
+% Overridden rather than patched so the vendored LPPL class stays pristine.
+\renewcommand{\cvitem}[4]{%
+	\parbox[t]{0.17\textwidth}{\raggedright #1} &%
+	\parbox[t]{0.81\textwidth}{%
+		\if\relax\detokenize{#4}\relax%
+			\parbox[t]{\linewidth-\widthof{\footnotesize #3}-1em}{\raggedright #2}%
+		\hfill {\footnotesize#3}%
+		\else%
+			\parbox[t]{\linewidth-\widthof{\footnotesize #3}-1em}{%
+				\raggedright \textbf{#2}%
+			} \hfill {\footnotesize#3} \\%
+			\textcolor{itemtextcolor}{#4}%
+		\fi%
+	}\\
+}
+
 \cvname{\VAR{ facts.identity.name | tex_escape }}
-\cvjobtitle{\VAR{ facts.identity.title | tex_escape }}
+\#{ The class sets the job title at \Large; a three-segment title overflows the }
+\#{ sidebar at that size, so step it down one. }
+\cvjobtitle{\small \VAR{ facts.identity.title | tex_escape }}
 \BLOCK{ if facts.identity.photo }\cvprofilepic{\VAR{ facts.identity.photo | tex_escape }}\BLOCK{ endif }
 \cvbirthday{\VAR{ facts.identity.birthdate | tex_escape }}
 \cvaddress{\VAR{ facts.identity.address | tex_escape }}
 \cvphone{\VAR{ facts.identity.phone | tex_escape }}
-\cvsite{\VAR{ facts.identity.linkedin | tex_escape }}
+\#{ \cvsite prints the URL as its own link text, which cannot be hyphenated }
+\#{ inside the sidebar. Link the full URL behind a short label instead. }
+\cvcustomdata{\faLinkedin}{\href{\VAR{ facts.identity.linkedin | tex_escape }}{\VAR{ facts.identity.linkedin | replace('https://www.linkedin.com/', '') | replace('https://linkedin.com/', '') | replace('https://www.', '') | replace('https://', '') | tex_escape }}}
 \cvcustomdata{\faGithub}{\href{\VAR{ facts.identity.github | tex_escape }}{afeefkt.github.io}}
 \cvmail{\VAR{ facts.identity.email | tex_escape }}
 \cvcustomdata{\faFlag}{\VAR{ facts.identity.nationality | tex_escape }}
 
 \addtofrontsidebar{
 	\graphicspath{{pics/flags/}}
-    \profilesection{About Me}
-	\aboutme{
+	\profilesection{About Me}
+	\#{ \aboutme defers typesetting into a \parbox, so \RaggedRight has to go }
+	\#{ inside the argument. Justified text this narrow leaves badness-10000 gaps. }
+	\aboutme{\RaggedRight
 		\VAR{ facts.identity.about | tex_escape }
 	}
 	\profilesection{Languages}
-\BLOCK{ for lang in facts.languages }
-\BLOCK{ if lang.lang == 'English' }
-        \pointskill{\faLanguage}{\VAR{ lang.lang | tex_escape }}{5}
-\BLOCK{ elif lang.lang == 'German' }
-		\pointskill{\flag{DE.png}}{\VAR{ lang.lang | tex_escape }(\VAR{ lang.level | tex_escape })}{3}
-\BLOCK{ endif }
+\BLOCK{ for lang in language_rows }
+	\pointskill{\BLOCK{ if lang.flag }\flag{\VAR{ lang.flag }.png}\BLOCK{ else }\faLanguage\BLOCK{ endif }}{\VAR{ lang.name | tex_escape }\BLOCK{ if lang.level } \textendash{} \VAR{ lang.level | tex_escape }\BLOCK{ endif }}{\VAR{ lang.dots }}
 \BLOCK{ endfor }
 
 	\profilesection{Skills}
+\#{ Bar length is proficiency (from the facts.yaml tier), not JD relevance. }
+\#{ Relevance decides which skills appear here and in what order. }
 \BLOCK{ for skill in matched_skills }
-        \barskill{}{\VAR{ skill | tex_escape }}{90}
+	\barskill{}{\VAR{ skill.name | tex_escape }}{\VAR{ skill.level }}
 \BLOCK{ endfor }
-\BLOCK{ for skill in other_skills }
-        \barskill{}{\VAR{ skill | tex_escape }}{50}
-\BLOCK{ endfor }
+\BLOCK{ if other_skills }
+	\#{ The sidebar does not reflow to page 2, so the remainder goes inline. }
+	\smallskip
+	\aboutme{\RaggedRight\small \VAR{ other_skills[:12] | map(attribute='name') | join(', ') | tex_escape }}
+\BLOCK{ endif }
 }
 
 \addtobacksidebar{
-	\profilesection{About Me}
-	\aboutme{
-		\VAR{ facts.identity.about | tex_escape }
-	}
+	\RaggedRight
 	\profilesection{Key Skills}
 	\begin{sidebarminipage}
 \BLOCK{ for skill in matched_skills[:8] }
-		\chartlabel{\VAR{ skill | tex_escape }}
+		\chartlabel{\VAR{ skill.name | tex_escape }}
 \BLOCK{ endfor }
 	\end{sidebarminipage}
 }
@@ -85,8 +109,9 @@
 \#{ header once per bullet and scramble the chronology. }
 \BLOCK{ for role in role_groups }
     \cvitem{\VAR{ role.dates | tex_escape }}{\VAR{ role.role_title | tex_escape } \\\VAR{ role.org | tex_escape }\BLOCK{ if role.location } | \VAR{ role.location | tex_escape }\BLOCK{ endif }}{\VAR{ role.duration | tex_escape }}{
+\#{ Only break BETWEEN bullets — a leading \\ opens every entry with a blank line. }
 \BLOCK{ for bullet in role.bullets }
-    \\\textbullet{} \VAR{ bullet.text | tex_escape }
+    \BLOCK{ if not loop.first }\\\BLOCK{ endif }\textbullet{} \VAR{ bullet.text | tex_escape }
 \BLOCK{ endfor }
     }
 \BLOCK{ endfor }

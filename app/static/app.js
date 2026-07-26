@@ -1024,7 +1024,10 @@ async function analyseJob() {
         model: applyModel.value || null,
       }),
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const msg = await resp.text();
+      throw new Error(msg || `HTTP ${resp.status}`);
+    }
 
     const doneData = await consumeTailorStream(resp, applyStatus);
 
@@ -1265,6 +1268,9 @@ async function generateDocs(channel) {
         matched_count: (d.matched || []).length,
         notes: d.notes || "",
         edited_body: d.edited_body || null,
+        // Both feed CV skill ranking — without them the sidebar is untailored
+        job_ad_text: $("jd-textarea").value || "",
+        matched_phrases: (d.matched || []).map(m => m.jd_phrase || "").filter(Boolean),
       }),
     });
 

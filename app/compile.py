@@ -8,7 +8,22 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-WORKSPACE = Path(__file__).parent.parent / "workspace"
+BASE_WORKSPACE = Path(__file__).parent.parent / "workspace"
+
+
+def _workspace() -> Path:
+    """Resolve the active workspace root at call time.
+
+    app.docs rebinds its module-level WORKSPACE to workspace/<profile>/ when a
+    profile is active, so this must read the attribute rather than import the
+    value — otherwise documents under a profile resolve to a path that doesn't
+    exist and compile reports "main.tex not found".
+    """
+    try:
+        import app.docs as _docs
+        return _docs.WORKSPACE
+    except Exception:
+        return BASE_WORKSPACE
 
 # MiKTeX installs to a user-local path that isn't always on PATH.
 _MIKTEX_CANDIDATES = [
@@ -184,7 +199,7 @@ def _git_commit(src_dir: Path, doc_path: str = "") -> bool:
 async def compile_doc(doc_path: str) -> CompileResult:
     """Compile workspace/<doc_path>/main.tex with lualatex (two passes)."""
 
-    src_dir = WORKSPACE / doc_path
+    src_dir = _workspace() / doc_path
     main_tex = src_dir / "main.tex"
 
     if not main_tex.exists():
@@ -218,9 +233,12 @@ async def compile_doc(doc_path: str) -> CompileResult:
             )
             logs.append(r.stdout or "")
             logs.append(r.stderr or "")
-            if r.returncode != 0:
+            # Only abort early on a real failure (no PDF produced).
+            # MiKTeX emits a non-fatal "check for updates" warning that sets
+            # returncode=1 even when compilation succeeded and a PDF exists.
+            if r.returncode != 0 and not (out_dir / "main.pdf").exists():
                 return r.returncode, "\n".join(logs)
-        return 0, "\n".join(logs)
+        return r.returncode, "\n".join(logs)
 
     try:
         returncode, log_text = await asyncio.to_thread(_run_passes)
@@ -240,7 +258,7 @@ async def compile_doc(doc_path: str) -> CompileResult:
     errors, warnings = _parse_log(log_text)
     pdf_candidate = out_dir / "main.pdf"
 
-    if returncode == 0 and pdf_candidate.exists():
+    if pdf_candidate.exists():
         stable_pdf = src_dir / "out.pdf"
         shutil.copy2(pdf_candidate, stable_pdf)
         committed = await asyncio.to_thread(_git_commit, src_dir, doc_path)

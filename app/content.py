@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.compile import compile_doc
-from app.docs import create_document, load_facts, render_template, tex_escape
+from app.docs import TEMPLATES, create_document, load_facts, render_template, tex_escape
 from app.guard.factbank import load_factbank
 from app.guard.validator import validate_assembled_text, validate_tailor_response
 from app.llm.provider import get_provider
@@ -156,7 +156,7 @@ async def tailor_letter(body: TailorRequest):
 
     facts = load_facts()
     if not facts:
-        raise HTTPException(400, "facts.yaml not found or empty")
+        raise HTTPException(400, "facts.yaml not found or empty — create one from facts.example.yaml")
 
     factbank = load_factbank()
 
@@ -363,7 +363,6 @@ class GenerateRequest(BaseModel):
     """Everything /tailor returned, plus the channel the user picked."""
     channel: str = "portal"                  # "portal" (ATS-safe) | "email" (designed)
     cv_template: str = ""                    # template ID to use for CV (defaults based on channel)
-    edited_body: str = ""                    # user-edited letter body (Phase 2), empty = use assembled
     company_name: str = ""
     role_title: str = ""
     location: str = ""
@@ -375,6 +374,8 @@ class GenerateRequest(BaseModel):
     matched_count: int = 0
     notes: str = ""
     edited_body: str | None = None           # Hand-edited letter body from preview step
+    job_ad_text: str = ""                    # Ranks CV skills by relevance to this ad
+    matched_phrases: list[str] = []          # JD phrases the LLM matched, for the same ranking
 
 
 def _slugify(text: str, fallback: str) -> str:
@@ -463,13 +464,18 @@ async def generate_documents(body: GenerateRequest):
             if b["id"] in optimized_map:
                 b["text"] = optimized_map[b["id"]]
 
-    matched_skills, other_skills = _split_skills(facts, role_groups)
+    matched_skills, other_skills = _split_skills(
+        facts, role_groups,
+        jd_text=body.job_ad_text,
+        matched_phrases=body.matched_phrases,
+    )
     cv_vars = {
         "facts": facts,
         "role_groups": role_groups,
         "selected_bullets": bullet_texts,
         "matched_skills": matched_skills,
         "other_skills": other_skills,
+        "language_rows": _language_rows(facts),
     }
     cv_info = _create_unique(f"cv_{slug}", cv_template, cv_vars)
 
@@ -517,31 +523,191 @@ async def generate_documents(body: GenerateRequest):
     }
 
 
-def _split_skills(facts: dict, role_groups: list[dict]) -> tuple[list[str], list[str]]:
-    """Split the skill list into ones this application evidences and the rest."""
-    seen_tags: set[str] = set()
+# Bar length comes from how well the candidate knows a skill, not from whether
+# this particular JD happens to mention it. JD relevance drives ordering and
+# inclusion instead — see _split_skills.
+TIER_LEVEL = {"expert": 90, "proficient": 70, "familiar": 45}
+
+# fortysecondscv's sidebar does not reflow onto page 2, so past roughly ten
+# bars the list runs off the bottom of the page.
+SIDEBAR_SKILL_LIMIT = 10
+
+# facts.yaml groups related tools into one string ("DOORS - Polarion - XCP").
+# As a single bar that both overflows the sidebar and gives five tools one
+# meaningless rating, so split them back apart. Requires spaces around the
+# dash, which leaves "ISO 26262 ASIL-B" and "MIL/SIL/HIL" intact.
+_COMPOUND_SEP = re.compile(r"\s+-\s+")
+
+
+def _norm(text: str) -> str:
+    """Strip separators and case so 'ISO 26262 ASIL-B' compares against 'iso26262'."""
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _mentions(haystack: str, needle: str) -> bool:
+    """Whether needle appears in haystack as a whole token.
+
+    Plain substring matching would let 'C#' hit inside 'C#-style' and 'Java'
+    inside 'JavaScript'. Guarding on alphanumerics rather than using \\b keeps
+    skills ending in punctuation ('C#', 'MATLAB/Simulink') matchable.
+    """
+    if not needle or not haystack:
+        return False
+    pattern = r"(?<![A-Za-z0-9])" + re.escape(needle) + r"(?![A-Za-z0-9])"
+    return re.search(pattern, haystack, re.IGNORECASE) is not None
+
+
+def _split_skills(
+    facts: dict,
+    role_groups: list[dict],
+    jd_text: str = "",
+    matched_phrases: list[str] | None = None,
+    limit: int = SIDEBAR_SKILL_LIMIT,
+) -> tuple[list[dict], list[dict]]:
+    """Order the skill list by relevance to this job ad.
+
+    Returns (matched, other) as [{"name", "level"}]. `matched` is what the JD
+    evidences, capped at `limit` so the sidebar cannot overflow the page.
+
+    Matching against bullet tags alone was not enough: a German-language ad
+    never matches English tags, so every application silently fell through to
+    the expert-skills fallback and the CV was not tailored at all. The job ad
+    text and the requirement phrases the LLM already matched are both checked.
+    """
+    # Two different matching problems. Ad prose is natural language, so a skill
+    # counts only if its full name appears as a token. Bullet tags are short
+    # slugs ('autosar', 'iso26262') that must match a longer skill name
+    # ('AUTOSAR Classic', 'ISO 26262 ASIL-B'), so those compare both directions
+    # with separators stripped.
+    prose = "\n".join([jd_text or ""] + list(matched_phrases or []))
+
+    tags: set[str] = set()
     for rg in role_groups:
         if not rg.get("tailored"):
             continue
         for b in rg["bullets"]:
-            for tag in b.get("tags", []) or []:
-                seen_tags.add(str(tag).lower())
+            for t in b.get("tags", []) or []:
+                norm = _norm(str(t))
+                if norm:
+                    tags.add(norm)
 
-    all_skills: list[str] = []
+    def _tag_hit(name: str) -> bool:
+        sn = _norm(name)
+        if not sn:
+            return False
+        for t in tags:
+            if t == sn:
+                return True
+            # Length floor stops 'C#' (normalising to 'c') matching 'canoe'.
+            if len(t) >= 3 and t in sn:
+                return True
+            if len(sn) >= 3 and sn in t:
+                return True
+        return False
+
+    seen: set[str] = set()
+    skills: list[dict] = []
     for tier in ("expert", "proficient", "familiar"):
-        for s in facts.get("skills", {}).get(tier, []) or []:
-            if isinstance(s, str):
-                all_skills.append(s)
+        for entry in facts.get("skills", {}).get(tier, []) or []:
+            if not isinstance(entry, str):
+                continue
+            for name in _COMPOUND_SEP.split(entry):
+                name = name.strip()
+                if not name or name.lower() in seen:
+                    continue
+                seen.add(name.lower())
+                skills.append({"name": name, "level": TIER_LEVEL.get(tier, 45)})
 
-    matched = {
-        skill for skill in all_skills
-        for tag in seen_tags
-        if tag in skill.lower() or skill.lower() in tag
-    }
+    matched = [
+        s for s in skills
+        if _mentions(prose, s["name"]) or _tag_hit(s["name"])
+    ]
     if not matched:
-        matched = set(facts.get("skills", {}).get("expert", [])[:8])
+        # Nothing in the ad lines up by name — lead with strongest skills so the
+        # sidebar is still ordered sensibly rather than alphabetical.
+        logger.info("No JD-relevant skills matched; falling back to top skills by tier")
+        matched = [s for s in skills if s["level"] >= TIER_LEVEL["expert"]]
 
-    return sorted(matched), sorted(s for s in all_skills if s not in matched)
+    def _rank(s: dict) -> tuple[int, str]:
+        return (-s["level"], s["name"].lower())
+
+    matched.sort(key=_rank)
+    matched = matched[:limit]
+
+    matched_names = {s["name"] for s in matched}
+    other = sorted((s for s in skills if s["name"] not in matched_names), key=_rank)
+    return matched, other
+
+
+# ── Language rendering ─────────────────────────────────────────────────────────
+#
+# The sidebar previously hardcoded an if/elif on 'English'/'German', which
+# silently dropped every other language and ignored the level in facts.yaml.
+
+_FLAG_CODES = {
+    "english": "GB", "german": "DE", "deutsch": "DE", "french": "FR",
+    "français": "FR", "chinese": "CN", "mandarin": "CN", "spanish": "ES",
+    "italian": "IT", "portuguese": "PT", "dutch": "NL", "polish": "PL",
+    "swedish": "SE", "turkish": "TR", "hindi": "IN", "malayalam": "IN",
+    "arabic": "SA", "russian": "RU", "japanese": "JP",
+}
+
+_CEFR_DOTS = {"a1": 1, "a2": 2, "b1": 3, "b2": 4, "c1": 5, "c2": 5}
+
+# Ordered: the first substring found wins, so 'full professional' resolves
+# before the looser 'professional'.
+_LEVEL_DOTS = [
+    ("native", 5), ("mother", 5), ("bilingual", 5), ("fluent", 5),
+    ("full professional", 5), ("professional", 5),
+    ("advanced", 4), ("business", 4),
+    ("intermediate", 3), ("conversational", 3),
+    ("elementary", 2), ("basic", 2), ("beginner", 1),
+]
+
+_CEFR_RE = re.compile(r"(?<![A-Za-z0-9])([ABC][12])(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _available_flags() -> set[str]:
+    """Flag codes shipped by every template that has a flags folder.
+
+    Intersecting rather than scanning one template keeps the sidebar from
+    referencing a PNG that the selected template happens not to ship.
+    """
+    dirs = list(TEMPLATES.glob("*/pics/flags")) if TEMPLATES.exists() else []
+    sets = [{p.stem.upper() for p in d.glob("*.png")} for d in dirs]
+    return set.intersection(*sets) if sets else set()
+
+
+def _language_dots(level: str) -> int:
+    """Map a free-text proficiency ('B1 (BAMF Certified)', 'Professional') to 1-5."""
+    text = (level or "").lower()
+    m = _CEFR_RE.search(text)
+    if m:
+        return _CEFR_DOTS.get(m.group(1).lower(), 3)
+    for word, dots in _LEVEL_DOTS:
+        if word in text:
+            return dots
+    return 3
+
+
+def _language_rows(facts: dict) -> list[dict]:
+    """Build sidebar-ready language entries for any language in facts.yaml."""
+    flags = _available_flags()
+    rows = []
+    for entry in facts.get("languages", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("lang", "")).strip()
+        if not name:
+            continue
+        code = _FLAG_CODES.get(name.lower(), "")
+        rows.append({
+            "name": name,
+            "level": str(entry.get("level", "")).strip(),
+            "dots": _language_dots(entry.get("level", "")),
+            "flag": code if code in flags else "",
+        })
+    return rows
 
 
 def _get_bullet_texts(facts: dict, bullet_ids: list[str]) -> list[dict]:
@@ -692,42 +858,16 @@ async def optimize_cv(body: OptimizeCvRequest):
             if b["id"] in optimized_map:
                 b["text"] = optimized_map[b["id"]]
 
-    # Determine matched skills from bullet tags + role tools
-    matched_skills: set[str] = set()
-    seen_tags: set[str] = set()
-    for b in bullets:
-        for tag in b.get("tags", []):
-            seen_tags.add(tag.lower())
-
-    all_skills = []
-    for tier in ("expert", "proficient", "familiar"):
-        for s in facts.get("skills", {}).get(tier, []):
-            if isinstance(s, str):
-                all_skills.append(s)
-
-    # Simple tag-to-skill matching: fuzzy
-    for skill in all_skills:
-        skill_lower = skill.lower()
-        for tag in seen_tags:
-            if tag in skill_lower or skill_lower in tag:
-                matched_skills.add(skill)
-                break
-
-    # Fallback: include all expert skills if no matches found
-    if not matched_skills:
-        for s in facts.get("skills", {}).get("expert", [])[:8]:
-            if isinstance(s, str):
-                matched_skills.add(s)
-
-    other_skills = [s for s in all_skills if s not in matched_skills]
+    matched_skills, other_skills = _split_skills(facts, role_groups)
 
     # Build template variables
     template_vars = {
         "facts": facts,
         "selected_bullets": bullets,      # flat list, kept for compatibility
         "role_groups": role_groups,       # one entry per role — what the template renders
-        "matched_skills": sorted(matched_skills),
-        "other_skills": sorted(other_skills),
+        "matched_skills": matched_skills,
+        "other_skills": other_skills,
+        "language_rows": _language_rows(facts),
     }
 
     # Create document (handles template rendering internally)
