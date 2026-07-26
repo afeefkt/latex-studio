@@ -49,6 +49,22 @@
 	}\\
 }
 
+% The class puts a \barskill label in an unbounded tikz node, so anything longer
+% than the sidebar silently runs off the edge. Curated bar names in facts.yaml are
+% author-chosen and can be any length, so give the node a text width and let it
+% wrap onto a second line instead. Otherwise identical to the class version.
+\renewcommand{\barskill}[3]{
+	\begin{tikzpicture}[x=\sidebartextwidth-1pt, y=1ex]
+			\draw[fill, skillbg, rounded corners=0.5em]
+				(0, 0) rectangle (1, 1);
+			\draw[fill, iconcolor!70, rounded corners=0.3em]
+				(0, 0) rectangle (#3/100, 1);
+			\node[above right, text width=\sidebartextwidth-2pt,
+			      align=left, inner xsep=0pt] at (0, 1) {\cvicon{#1} ~ #2};
+	\end{tikzpicture}
+	\par
+}
+
 \cvname{\VAR{ facts.identity.name | tex_escape }}
 \#{ The class sets the job title at \Large; a three-segment title overflows the }
 \#{ sidebar at that size, so step it down one. }
@@ -60,9 +76,11 @@
 \#{ \cvsite prints the URL as its own link text, which cannot be hyphenated }
 \#{ inside the sidebar. Link the full URL behind a short label instead. }
 \cvcustomdata{\faLinkedin}{\href{\VAR{ facts.identity.linkedin | tex_escape }}{\VAR{ facts.identity.linkedin | replace('https://www.linkedin.com/', '') | replace('https://linkedin.com/', '') | replace('https://www.', '') | replace('https://', '') | tex_escape }}}
-\cvcustomdata{\faGithub}{\href{\VAR{ facts.identity.github | tex_escape }}{afeefkt.github.io}}
+\#{ Label derived from the URL rather than hardcoded, so the template stays generic. }
+\cvcustomdata{\faGithub}{\href{\VAR{ facts.identity.github | tex_escape }}{\VAR{ facts.identity.github | replace('https://www.', '') | replace('https://', '') | replace('http://', '') | trim('/') | tex_escape }}}
 \cvmail{\VAR{ facts.identity.email | tex_escape }}
 \cvcustomdata{\faFlag}{\VAR{ facts.identity.nationality | tex_escape }}
+\BLOCK{ if facts.identity.work_authorisation }\cvcustomdata{\faIdCard}{\VAR{ facts.identity.work_authorisation | tex_escape }}\BLOCK{ endif }
 
 \addtofrontsidebar{
 	\graphicspath{{pics/flags/}}
@@ -85,8 +103,18 @@
 \BLOCK{ endfor }
 \BLOCK{ if other_skills }
 	\#{ The sidebar does not reflow to page 2, so the remainder goes inline. }
+	\#{ Eight is what fits below the bars alongside a photo and hobbies. }
 	\smallskip
-	\aboutme{\RaggedRight\small \VAR{ other_skills[:12] | map(attribute='name') | join(', ') | tex_escape }}
+	\aboutme{\RaggedRight\small \VAR{ other_skills[:8] | map(attribute='name') | join(', ') | tex_escape }}
+\BLOCK{ endif }
+\BLOCK{ if facts.hobbies }
+
+	\profilesection{Hobbies}
+\#{ An entry is a plain string, or a mapping with text and icon keys. }
+\#{ NB: comment_end_string is a bare brace, so never write one inside a comment. }
+\BLOCK{ for hobby in facts.hobbies }
+	\skill{\VAR{ hobby.icon if hobby is mapping and hobby.icon else '\\faStar' }}{\VAR{ (hobby.text if hobby is mapping else hobby) | tex_escape }}
+\BLOCK{ endfor }
 \BLOCK{ endif }
 }
 
@@ -113,6 +141,9 @@
 \BLOCK{ for bullet in role.bullets }
     \BLOCK{ if not loop.first }\\\BLOCK{ endif }\textbullet{} \VAR{ bullet.text | tex_escape }
 \BLOCK{ endfor }
+\BLOCK{ if role.tools }
+    \newline\small\textbf{Tools}: \VAR{ role.tools | join(', ') | tex_escape }
+\BLOCK{ endif }
     }
 \BLOCK{ endfor }
 \end{cvtable}

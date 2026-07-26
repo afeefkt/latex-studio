@@ -111,6 +111,10 @@ async def remove_doc(doc_path: str):
         return {"deleted": True}
     except FileNotFoundError:
         raise HTTPException(404, f"{doc_path} not found")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
 
 
 # ── Templates ─────────────────────────────────────────────────────────────────

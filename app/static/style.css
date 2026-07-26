@@ -186,7 +186,27 @@ button:hover, .btn-link:hover { background: var(--border); }
 .doc-item.active { background: rgba(137,180,250,0.12); color: var(--accent); }
 
 .doc-icon { font-size: 14px; }
-.doc-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+
+/* Destructive, so it stays out of the way until the row is hovered. Focus shows
+   it too, otherwise it would be unreachable by keyboard. */
+.doc-delete {
+  flex: none;
+  opacity: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: opacity 0.1s, color 0.1s, background 0.1s;
+}
+.doc-item:hover .doc-delete,
+.doc-delete:focus-visible { opacity: 1; }
+.doc-delete:hover { color: var(--error); background: rgba(243,139,168,0.15); }
+.doc-delete:disabled { opacity: 0.4; cursor: default; }
 
 /* ── Main workspace ───────────────────────────────────────────────────────── */
 #workspace {

@@ -7,9 +7,11 @@
 from app.content import (
     SIDEBAR_SKILL_LIMIT,
     TIER_LEVEL,
+    _group_bullets_by_role,
     _language_dots,
     _language_rows,
     _mentions,
+    _sidebar_skill_limit,
     _split_skills,
 )
 
@@ -165,3 +167,140 @@ def test_language_row_flag_falls_back_when_asset_missing():
     """A flag code is only emitted when the PNG actually ships with the templates."""
     rows = _language_rows({"languages": [{"lang": "Klingon", "level": "Fluent"}]})
     assert rows[0]["flag"] == ""
+
+
+# ── Curated skill bars ─────────────────────────────────────────────────────────
+
+CURATED = dict(FACTS, skill_bars=[
+    {"name": "MBD - Matlab/Simulink/m-Scripting", "level": 90},
+    {"name": "Embedded C / AUTOSAR / MISRA", "level": 70},
+])
+
+
+def test_curated_bars_lead_in_authored_order():
+    """The author chose both the wording and the order; neither gets re-sorted."""
+    bars, _ = _split_skills(CURATED, [], jd_text="Python")
+    assert _names(bars)[:2] == [
+        "MBD - Matlab/Simulink/m-Scripting",
+        "Embedded C / AUTOSAR / MISRA",
+    ]
+    assert bars[0]["level"] == 90
+    assert bars[1]["level"] == 70
+
+
+def test_curated_name_is_not_split_on_its_dash():
+    """_COMPOUND_SEP would shred a curated name and undo the author's grouping."""
+    bars, other = _split_skills(CURATED, [], jd_text="")
+    every = _names(bars) + _names(other)
+    assert "MBD - Matlab/Simulink/m-Scripting" in every
+    assert "MBD" not in every
+    assert "Matlab/Simulink/m-Scripting" not in every
+
+
+def test_jd_relevant_extras_appended_after_curated():
+    """No curated bar covers ISO 26262, so the ad can still surface it — after
+    the curated block, not interleaved into it."""
+    bars, _ = _split_skills(CURATED, [], jd_text="experience with ISO 26262 ASIL-B required")
+    assert "ISO 26262 ASIL-B" in _names(bars)
+    assert _names(bars).index("ISO 26262 ASIL-B") > 1
+
+
+def test_curated_bar_suppresses_the_skill_it_covers():
+    """'MATLAB/Simulink' must not appear twice — the MBD bar already speaks for it."""
+    bars, other = _split_skills(CURATED, [], jd_text="MATLAB/Simulink and Stateflow")
+    every = _names(bars) + _names(other)
+    assert "MATLAB/Simulink" not in every
+
+
+def test_coverage_ignores_generic_words():
+    """'Embedded Coder toolchain evaluation' shares only 'embedded' with a curated
+    bar, which is far too generic to mean the bar covers it."""
+    facts = dict(CURATED, skills={
+        "expert": ["Embedded C"],
+        "familiar": ["Embedded Coder toolchain evaluation"],
+    })
+    bars, other = _split_skills(facts, [], jd_text="")
+    every = _names(bars) + _names(other)
+    assert "Embedded Coder toolchain evaluation" in every
+    # 'Embedded C' is spelled out in full by the curated bar, so it is covered
+    assert "Embedded C" not in every
+
+
+def test_curated_bars_respect_the_limit():
+    facts = dict(FACTS, skill_bars=[
+        {"name": f"Curated {i}", "level": 50} for i in range(20)
+    ])
+    bars, _ = _split_skills(facts, [], jd_text="")
+    assert len(bars) == SIDEBAR_SKILL_LIMIT
+
+
+def test_malformed_curated_entries_are_skipped():
+    facts = dict(FACTS, skill_bars=[
+        "just a string", {"level": 70}, {"name": "  "},
+        {"name": "Good One", "level": "not a number"},
+    ])
+    bars, _ = _split_skills(facts, [], jd_text="")
+    assert "Good One" in _names(bars)
+    assert _level_of(bars, "Good One") == 70  # falls back rather than raising
+
+
+# ── Sidebar budget ─────────────────────────────────────────────────────────────
+
+def test_sidebar_budget_shrinks_for_photo_and_hobbies():
+    """The sidebar drops overflow off the page silently, so space taken by the
+    photo and hobbies has to be reserved before choosing how many bars to show."""
+    assert _sidebar_skill_limit({}) == SIDEBAR_SKILL_LIMIT
+    assert _sidebar_skill_limit({"identity": {"photo": "p.png"}}) == SIDEBAR_SKILL_LIMIT - 2
+    assert _sidebar_skill_limit({"hobbies": ["a"]}) == SIDEBAR_SKILL_LIMIT - 3
+    both = {"identity": {"photo": "p.png"}, "hobbies": ["a"]}
+    assert _sidebar_skill_limit(both) == SIDEBAR_SKILL_LIMIT - 5
+
+
+def test_sidebar_budget_never_collapses_to_nothing():
+    facts = {"identity": {"photo": "p.png"}, "hobbies": ["a"]}
+    assert _sidebar_skill_limit(facts) >= 3
+
+
+def test_split_skills_uses_the_adaptive_budget():
+    facts = dict(FACTS, identity={"photo": "p.png"}, hobbies=["chess"],
+                 skills={"expert": [f"Skill {i}" for i in range(20)]})
+    bars, _ = _split_skills(facts, [], jd_text=" ".join(f"Skill {i}" for i in range(20)))
+    assert len(bars) == _sidebar_skill_limit(facts)
+
+
+# ── Role grouping ──────────────────────────────────────────────────────────────
+
+ROLE_FACTS = {
+    "roles": [{
+        "title": "Engineer", "org": "Acme", "start": "2020", "end": "2022",
+        "tools": ["MATLAB", "Git"],
+        "bullets": [
+            {"id": "b1", "text": "first", "tags": ["autosar"]},
+            {"id": "b2", "text": "second", "tags": ["canoe"]},
+            {"id": "b3", "text": "third", "tags": ["python"]},
+        ],
+    }],
+}
+
+
+def test_all_bullets_shown_with_selected_first():
+    """Showing only the selected bullets left the page half empty."""
+    groups = _group_bullets_by_role(ROLE_FACTS, ["b3"])
+    assert [b["id"] for b in groups[0]["bullets"]] == ["b3", "b1", "b2"]
+    assert [b["selected"] for b in groups[0]["bullets"]] == [True, False, False]
+
+
+def test_role_tools_are_carried_through():
+    groups = _group_bullets_by_role(ROLE_FACTS, ["b1"])
+    assert groups[0]["tools"] == ["MATLAB", "Git"]
+
+
+def test_unselected_bullet_tags_do_not_dilute_skill_matching():
+    """Retained roles now carry their unselected bullets, whose tags must not be
+    mistaken for evidence that the job ad wanted those skills."""
+    facts = dict(ROLE_FACTS, skills={"expert": ["AUTOSAR Classic", "CANoe", "Python"]})
+    groups = _group_bullets_by_role(facts, ["b1"])
+    bars, other = _split_skills(facts, groups, jd_text="")
+    assert "AUTOSAR Classic" in _names(bars)          # tagged on the selected bullet
+    assert "CANoe" in _names(other)                   # only on an unselected one
+    assert "Python" in _names(other)

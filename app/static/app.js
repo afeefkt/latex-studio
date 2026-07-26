@@ -165,9 +165,16 @@ function renderDocList(docs) {
   let html = docs.map(d => {
     const icon = d.kind === "letter" ? "✉️" : "📄";
     const active = currentDoc && currentDoc.path === d.path ? " active" : "";
-    return `<div class="doc-item${active}" data-path="${d.path}" data-kind="${d.kind}">
+    const path = escapeHTML(d.path);
+    const name = escapeHTML(d.name);
+    // The base CV is where the designed templates get their class file and photo.
+    // The server refuses to delete it, so don't offer a button that cannot work.
+    const del = d.path === "cv" ? "" :
+      `<button class="doc-delete" data-del="${path}" title="Delete ${name}" aria-label="Delete ${name}">×</button>`;
+    return `<div class="doc-item${active}" data-path="${path}" data-kind="${d.kind}">
       <span class="doc-icon">${icon}</span>
-      <span class="doc-name">${d.name}</span>
+      <span class="doc-name">${name}</span>
+      ${del}
     </div>`;
   }).join("");
 
@@ -188,6 +195,46 @@ function renderDocList(docs) {
   docList.querySelectorAll(".doc-item").forEach(el => {
     el.addEventListener("click", () => switchDocument(el.dataset.path, el.dataset.kind));
   });
+
+  docList.querySelectorAll(".doc-delete").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      // Without this the row's own handler also fires and opens what we deleted.
+      e.stopPropagation();
+      deleteDocument(btn.dataset.del, btn);
+    });
+  });
+}
+
+async function deleteDocument(path, btn) {
+  const msg = `Delete "${path}"?\n\n`
+    + "The document folder and its version history are removed. This cannot be undone.";
+  if (!confirm(msg)) return;
+
+  btn.disabled = true;
+  try {
+    // doc_path is a :path route param, so slashes in letter paths must stay raw.
+    const resp = await fetch(`/api/docs/${path}`, { method: "DELETE" });
+    if (!resp.ok) {
+      let detail = `HTTP ${resp.status}`;
+      try { detail = (await resp.json()).detail || detail; } catch (_) {}
+      alert(`Could not delete:\n\n${detail}`);
+      btn.disabled = false;
+      return;
+    }
+
+    // Editing a folder that no longer exists would fail on the next save.
+    const wasOpen = currentDoc && currentDoc.path === path;
+    if (wasOpen) {
+      currentDoc = null;
+      currentFile = null;
+      fileTabs.innerHTML = "";
+    }
+    await loadDocList();
+    if (wasOpen) await switchDocument("cv", "cv");
+  } catch (e) {
+    alert("Network error while deleting. Try again.");
+    btn.disabled = false;
+  }
 }
 
 // ── Document switching ────────────────────────────────────────────────────────

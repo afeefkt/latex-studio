@@ -1,7 +1,9 @@
 """Workspace file CRUD, template management, document creation, git auto-commit."""
 
 import json
+import os
 import shutil
+import stat
 from pathlib import Path
 
 import jinja2
@@ -194,8 +196,11 @@ def adapt_facts(facts: dict, template_id: str = "", selected_bullet_ids: list[st
     for role in roles_raw:
         role_bullets = role.get("bullets", []) or []
         if selected:
+            # Show every bullet of a retained role, JD-relevant ones first — kept in
+            # step with _group_bullets_by_role in content.py so the ATS and designed
+            # templates never disagree about what a role contains.
             picked = [b for b in role_bullets if b.get("id") in selected]
-            shown = picked if picked else role_bullets
+            shown = picked + [b for b in role_bullets if b.get("id") not in selected]
         else:
             shown = role_bullets
         if not shown:
@@ -211,7 +216,12 @@ def adapt_facts(facts: dict, template_id: str = "", selected_bullet_ids: list[st
             "tools": role.get("tools", []),
             "tailored": bool(selected and any(b.get("id") in selected for b in role_bullets)),
             "bullets": [
-                {"id": b.get("id", ""), "text": b.get("text", ""), "tags": b.get("tags", [])}
+                {
+                    "id": b.get("id", ""),
+                    "text": b.get("text", ""),
+                    "tags": b.get("tags", []),
+                    "selected": b.get("id") in selected,
+                }
                 for b in shown
             ],
         })
@@ -406,6 +416,24 @@ def list_templates() -> list[dict]:
 
 # ── Document creation from template ───────────────────────────────────────────
 
+# What a document actually needs to compile: the class/package files and images.
+# The source folder also accumulates build output and unrelated documents — a
+# previous CV PDF was being duplicated into every generated application folder.
+_ASSET_SKIP_NAMES = {".build", "out.pdf", "__pycache__", ".gitignore", ".git"}
+_ASSET_SKIP_SUFFIXES = {
+    ".pdf", ".aux", ".log", ".out", ".fls", ".fdb_latexmk", ".synctex", ".gz",
+}
+
+
+def _skip_asset(name: str) -> bool:
+    return name in _ASSET_SKIP_NAMES or Path(name).suffix.lower() in _ASSET_SKIP_SUFFIXES
+
+
+def _ignore_assets(_dir: str, names: list[str]) -> set[str]:
+    """shutil.copytree filter — keeps the same junk out of nested folders."""
+    return {n for n in names if _skip_asset(n)}
+
+
 def create_document(name: str, template_id: str, variables: dict | None = None) -> dict:
     """
     Create a new document folder from a template.
@@ -447,21 +475,21 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
         src_dir = WORKSPACE / tdata["copy_from"]
         if src_dir.exists():
             for item in src_dir.iterdir():
-                if item.name in (".build", "out.pdf", "__pycache__", ".gitignore"):
+                if _skip_asset(item.name):
                     continue
                 dest = target_dir / item.name
                 if item.is_dir():
-                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                    shutil.copytree(item, dest, dirs_exist_ok=True, ignore=_ignore_assets)
                 else:
                     shutil.copy2(item, dest)
         else:
             # Fallback: copy class/pics bundled in the template directory
             for item in tpl_dir.iterdir():
-                if item.name in ("template.json", "main.tex.j2"):
+                if item.name in ("template.json", "main.tex.j2") or _skip_asset(item.name):
                     continue
                 dest = target_dir / item.name
                 if item.is_dir():
-                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                    shutil.copytree(item, dest, dirs_exist_ok=True, ignore=_ignore_assets)
                 elif item.name != "main.tex":
                     shutil.copy2(item, dest)
 
@@ -489,11 +517,64 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
 
 # ── Document deletion ─────────────────────────────────────────────────────────
 
+# Templates declaring "copy_from" pull their class file and images out of this
+# document. Deleting it would leave every future designed CV without them: the
+# fallback in create_document only reaches the template folder, which ships the
+# flag icons but no profile photo.
+BASE_CV_DOC = "cv"
+
+
+def _force_rmtree(path: Path) -> None:
+    """rmtree that coexists with git's read-only object files.
+
+    Git stores objects read-only. On Windows os.unlink then fails with EACCES and
+    the delete aborts half-finished, leaving a wrecked folder behind. Older
+    documents carry a nested .git copied in from the base CV, so this is the
+    common case rather than the exotic one.
+    """
+    def _on_error(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    shutil.rmtree(path, onexc=_on_error)
+
+
 def delete_document(doc_path: str) -> None:
-    target = WORKSPACE / doc_path
+    clean = (doc_path or "").strip().replace("\\", "/").strip("/")
+    if not clean:
+        raise FileNotFoundError("No document specified")
+
+    if clean == BASE_CV_DOC:
+        raise PermissionError(
+            "'cv' is the base CV that the designed templates copy their class file "
+            "and profile photo from. Deleting it would silently break future CVs."
+        )
+
+    root = WORKSPACE.resolve()
+    target = (WORKSPACE / clean).resolve()
+    # Deletion is destructive and the path arrives from a URL, so confirm it
+    # actually lands inside the workspace before removing anything.
+    if target == root or not target.is_relative_to(root):
+        raise PermissionError(f"Refusing to delete outside the workspace: '{doc_path}'")
+
     if not target.exists():
         raise FileNotFoundError(f"Document '{doc_path}' not found")
-    shutil.rmtree(target)
+
+    # Deliberately not PermissionError: that is the signal for the guards above,
+    # and an OS-level EACCES here would otherwise be reported as "refused".
+    try:
+        _force_rmtree(target)
+    except OSError as e:
+        raise RuntimeError(f"Could not delete '{doc_path}': {e}") from e
+
+    # The per-document git dir lives outside the document tree, so removing the
+    # folder alone leaves it orphaned under .docgit/ forever.
+    git_dir = DOCGIT_DIR / clean.replace("/", "-").strip("-")
+    if git_dir.exists():
+        try:
+            _force_rmtree(git_dir)
+        except OSError:
+            pass  # The document is gone; a stale git dir is not worth failing over.
 
 
 # ── Document file listing ─────────────────────────────────────────────────────

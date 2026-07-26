@@ -532,6 +532,24 @@ TIER_LEVEL = {"expert": 90, "proficient": 70, "familiar": 45}
 # bars the list runs off the bottom of the page.
 SIDEBAR_SKILL_LIMIT = 10
 
+
+def _sidebar_skill_limit(facts: dict) -> int:
+    """How many bars fit alongside whatever else the sidebar is carrying.
+
+    The sidebar is a fixed-height textblock: it neither reflows to page 2 nor
+    warns on overrun, it just drops content off the bottom edge, so the budget has
+    to be reserved up front. Measured by compiling this layout — ten bars fit on
+    their own, a profile photo costs about two, and a hobbies list about three
+    (its entries wrap when the text is long, as 'AI Enthusiast / Implementing
+    local AI' does).
+    """
+    limit = SIDEBAR_SKILL_LIMIT
+    if facts.get("identity", {}).get("photo"):
+        limit -= 2
+    if facts.get("hobbies"):
+        limit -= 3
+    return max(3, limit)
+
 # facts.yaml groups related tools into one string ("DOORS - Polarion - XCP").
 # As a single bar that both overflows the sidebar and gives five tools one
 # meaningless rating, so split them back apart. Requires spaces around the
@@ -542,6 +560,53 @@ _COMPOUND_SEP = re.compile(r"\s+-\s+")
 def _norm(text: str) -> str:
     """Strip separators and case so 'ISO 26262 ASIL-B' compares against 'iso26262'."""
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+# Words too generic to imply that one skill covers another. Without these,
+# 'Embedded Coder toolchain evaluation' is swallowed by 'Embedded C / AUTOSAR /
+# MISRA' on the shared word 'embedded' alone.
+_GENERIC_WORDS = {
+    "embedded", "software", "hardware", "test", "tests", "testing",
+    "automation", "automated", "requirements", "design", "system", "systems",
+    "tool", "tools", "toolchain", "development", "engineering", "management",
+    "analysis", "based", "and", "the", "for", "with",
+}
+
+
+def _tokens(text: str) -> set[str]:
+    """Significant lowercase words. Drops 1-2 char noise so the 'C' in
+    'Embedded C / AUTOSAR' cannot collide with every other skill."""
+    return {t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if len(t) >= 3}
+
+
+def _distinctive(text: str) -> set[str]:
+    """Tokens that actually identify a skill. Falls back to the full token set for
+    names built entirely from generic words ('Embedded C'), which would otherwise
+    compare as empty and never match anything."""
+    toks = _tokens(text)
+    return (toks - _GENERIC_WORDS) or toks
+
+
+def _curated_bars(facts: dict) -> list[dict]:
+    """Hand-authored sidebar bars from facts.yaml, in the order written.
+
+    These deliberately bypass _COMPOUND_SEP: a curated name like
+    'MBD - Matlab/Simulink/m-Scripting' is one bar by intent, and splitting it
+    would undo exactly the grouping the author chose.
+    """
+    bars = []
+    for entry in facts.get("skill_bars", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            continue
+        try:
+            level = int(entry.get("level", 70))
+        except (TypeError, ValueError):
+            level = 70
+        bars.append({"name": name, "level": max(0, min(100, level))})
+    return bars
 
 
 def _mentions(haystack: str, needle: str) -> bool:
@@ -562,7 +627,7 @@ def _split_skills(
     role_groups: list[dict],
     jd_text: str = "",
     matched_phrases: list[str] | None = None,
-    limit: int = SIDEBAR_SKILL_LIMIT,
+    limit: int | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Order the skill list by relevance to this job ad.
 
@@ -574,6 +639,9 @@ def _split_skills(
     the expert-skills fallback and the CV was not tailored at all. The job ad
     text and the requirement phrases the LLM already matched are both checked.
     """
+    if limit is None:
+        limit = _sidebar_skill_limit(facts)
+
     # Two different matching problems. Ad prose is natural language, so a skill
     # counts only if its full name appears as a token. Bullet tags are short
     # slugs ('autosar', 'iso26262') that must match a longer skill name
@@ -586,6 +654,10 @@ def _split_skills(
         if not rg.get("tailored"):
             continue
         for b in rg["bullets"]:
+            # Retained roles now carry their unselected bullets too, so harvesting
+            # every tag here would drown the JD signal in unrelated ones.
+            if not b.get("selected", True):
+                continue
             for t in b.get("tags", []) or []:
                 norm = _norm(str(t))
                 if norm:
@@ -632,11 +704,40 @@ def _split_skills(
         return (-s["level"], s["name"].lower())
 
     matched.sort(key=_rank)
-    matched = matched[:limit]
 
-    matched_names = {s["name"] for s in matched}
-    other = sorted((s for s in skills if s["name"] not in matched_names), key=_rank)
-    return matched, other
+    curated = _curated_bars(facts)
+    if not curated:
+        matched = matched[:limit]
+        matched_names = {s["name"] for s in matched}
+        other = sorted((s for s in skills if s["name"] not in matched_names), key=_rank)
+        return matched, other
+
+    # Curated bars lead, in the order the author wrote them, at their stated levels.
+    # A tier skill is dropped when a curated bar already speaks for it — compared on
+    # shared words, since 'AUTOSAR Classic' is covered by 'Embedded C / AUTOSAR /
+    # MISRA' without either string containing the other.
+    curated_sig = [(_distinctive(b["name"]), _tokens(b["name"])) for b in curated]
+
+    def _covered(name: str) -> bool:
+        sig, toks = _distinctive(name), _tokens(name)
+        for bar_sig, bar_toks in curated_sig:
+            if sig & bar_sig:
+                return True
+            # Names made only of generic words ('Embedded C') have no distinctive
+            # tokens to match on, so accept them when the bar spells them out in full.
+            if toks and toks <= bar_toks:
+                return True
+        return False
+
+    extras = [s for s in matched if not _covered(s["name"])]
+    bars = (curated + extras)[:limit]
+
+    bar_names = {b["name"] for b in bars}
+    other = sorted(
+        (s for s in skills if s["name"] not in bar_names and not _covered(s["name"])),
+        key=_rank,
+    )
+    return bars, other
 
 
 # ── Language rendering ─────────────────────────────────────────────────────────
@@ -801,6 +902,16 @@ def _group_bullets_by_role(facts: dict, bullet_ids: list[str]) -> list[dict]:
        silently drops a job creates an unexplained employment gap, which reads far
        worse than an off-topic bullet. Roles with no selection fall back to their
        own bullets; tailoring shows up as which bullets lead, not which jobs vanish.
+
+    3. Every bullet of a retained role is shown, JD-relevant ones first. Showing only
+       the selected two or three left the page half empty and read thinner than the
+       hand-written CV. Ordering stays deterministic: selection is a set, and
+       facts.yaml order is preserved within each group, so the output is still
+       assembled rather than generated.
+
+    Each bullet carries `selected` so callers can tell the tailored ones apart —
+    _split_skills relies on it to harvest tags only from bullets the JD actually
+    matched, which would otherwise be diluted by the unselected ones.
     """
     selected = set(bullet_ids)
     roles_out: list[dict] = []
@@ -808,7 +919,8 @@ def _group_bullets_by_role(facts: dict, bullet_ids: list[str]) -> list[dict]:
     for role in facts.get("roles", []):
         role_bullets = role.get("bullets", []) or []
         picked = [b for b in role_bullets if b.get("id") in selected]
-        shown = picked if picked else role_bullets
+        rest = [b for b in role_bullets if b.get("id") not in selected]
+        shown = picked + rest
 
         if not shown:
             continue
@@ -821,9 +933,15 @@ def _group_bullets_by_role(facts: dict, bullet_ids: list[str]) -> list[dict]:
             "end": role.get("end", ""),
             "duration": role.get("duration", ""),
             "dates": f"{role.get('start', '')} – {role.get('end', '')}",
+            "tools": role.get("tools", []) or [],
             "tailored": bool(picked),
             "bullets": [
-                {"id": b.get("id", ""), "text": b.get("text", ""), "tags": b.get("tags", [])}
+                {
+                    "id": b.get("id", ""),
+                    "text": b.get("text", ""),
+                    "tags": b.get("tags", []),
+                    "selected": b.get("id") in selected,
+                }
                 for b in shown
             ],
         })

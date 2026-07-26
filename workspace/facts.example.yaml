@@ -18,7 +18,11 @@ identity:
     aerospace domains. Specialised in model-based design, real-time systems,
     and safety-critical software development.
   work_authorisation: "EU citizen — no visa required"
-  # photo: "pics/PIC_SQR.png"  # optional — square crop, place the file in workspace/templates/*/pics/
+  # Optional headshot, square crop. The path is relative to the generated document
+  # folder. Put the file in your base CV's pics/ folder (workspace/<profile>/cv/pics/)
+  # and it is copied into every generated CV automatically; leave this unset to omit
+  # the photo entirely.
+  # photo: "pics/PIC_SQR.png"
 
 education:
 - degree: "B.Sc. Electrical Engineering"
@@ -60,6 +64,18 @@ roles:
     text: "Maintained legacy C code for engine control unit, reducing bug count by 30%."
     tags: ["C", "ECU", "maintenance"]
 
+# Optional. Hand-curated sidebar bars for the two-column CV templates, when you want
+# your own groupings and wording instead of one bar per skill. These render first at
+# the levels given here; JD-relevant skills from the tiers below are appended after.
+# Omit this block entirely to derive every bar from the tiers instead.
+# skill_bars:
+#   - name: "MBD - Matlab/Simulink/m-Scripting"
+#     level: 90
+#   - name: "Embedded C / AUTOSAR / MISRA"
+#     level: 70
+
+# Tier sets bar length when a skill is not covered by skill_bars above:
+# expert 90, proficient 70, familiar 45. Relevance to the job ad sets the order.
 skills:
   expert:
     - "C"
