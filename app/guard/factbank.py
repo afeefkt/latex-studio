@@ -1,13 +1,11 @@
 # ── Phase 4: FactBank — load + index facts.yaml ──
 
 import re
-from pathlib import Path
 
 import yaml
 
 from app.guard.models import FactBank
-
-WORKSPACE = Path(__file__).parent.parent.parent / "workspace"
+from app.paths import WORKSPACE
 DEFAULT_FACTS_PATH = WORKSPACE / "facts.yaml"
 
 

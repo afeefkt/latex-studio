@@ -4,23 +4,22 @@ import json
 import os
 import shutil
 import stat
-from pathlib import Path
 
 import jinja2
 import yaml
 
+from app.paths import DATA_ROOT, DOCGIT_DIR, WORKSPACE as PATHS_WORKSPACE, TEMPLATES as PATHS_TEMPLATES, TEMPLATES_SRC
+
 # ── Profile-aware workspace paths ──────────────────────────────────────────────
 
-BASE_WORKSPACE = Path(__file__).parent.parent / "workspace"
 _active_profile: str | None = None
 
-# Workspace, facts, and per-doc git paths shift with the active profile.
-# Templates and the Jinja loader stay at BASE level (shared across profiles).
-WORKSPACE = BASE_WORKSPACE
-TEMPLATES = BASE_WORKSPACE / "templates"
-FACTS_PATH = BASE_WORKSPACE / "facts.yaml"
-DOCGIT_DIR = BASE_WORKSPACE.parent / ".docgit"
-PROFILES_JSON = BASE_WORKSPACE / "profiles.json"
+# These module-level vars are rebindable by set_active_profile().
+# They start as passthroughs to the central paths module.
+WORKSPACE: Path = PATHS_WORKSPACE
+TEMPLATES: Path = PATHS_TEMPLATES
+FACTS_PATH: Path = WORKSPACE / "facts.yaml"
+PROFILES_JSON: Path = WORKSPACE / "profiles.json"
 
 
 def get_active_profile() -> str | None:
@@ -32,9 +31,9 @@ def set_active_profile(profile: str | None) -> None:
     global _active_profile, WORKSPACE, FACTS_PATH, DOCGIT_DIR
     _active_profile = profile
     if profile:
-        WORKSPACE = BASE_WORKSPACE / profile
+        WORKSPACE = PATHS_WORKSPACE / profile
     else:
-        WORKSPACE = BASE_WORKSPACE
+        WORKSPACE = PATHS_WORKSPACE
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     FACTS_PATH = WORKSPACE / "facts.yaml"
     DOCGIT_DIR = WORKSPACE.parent / ".docgit"
@@ -74,11 +73,11 @@ def create_profile(name: str) -> dict:
     profiles.append(profile)
     save_profiles(profiles)
     # Create the profile workspace directory
-    (BASE_WORKSPACE / clean).mkdir(parents=True, exist_ok=True)
-    (BASE_WORKSPACE / clean / "letters").mkdir(parents=True, exist_ok=True)
+    (PATHS_WORKSPACE / clean).mkdir(parents=True, exist_ok=True)
+    (PATHS_WORKSPACE / clean / "letters").mkdir(parents=True, exist_ok=True)
     # Copy facts.example.yaml as starter facts if no facts.yaml exists
-    example = BASE_WORKSPACE / "facts.example.yaml"
-    target = BASE_WORKSPACE / clean / "facts.yaml"
+    example = PATHS_WORKSPACE / "facts.example.yaml"
+    target = PATHS_WORKSPACE / clean / "facts.yaml"
     if example.exists() and not target.exists():
         target.write_text(example.read_text(encoding="utf-8"))
     return profile
@@ -349,8 +348,21 @@ def pdf_path(doc_path: str) -> Path:
 
 def init_workspace() -> None:
     """Ensure workspace and required sub-directories exist; seed default profile."""
-    BASE_WORKSPACE.mkdir(exist_ok=True)
+    PATHS_WORKSPACE.mkdir(exist_ok=True)
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+
+    # First-run: seed templates from the bundled copy (frozen mode)
+    if not TEMPLATES.exists() and TEMPLATES_SRC.exists():
+        shutil.copytree(TEMPLATES_SRC, TEMPLATES)
     TEMPLATES.mkdir(exist_ok=True)
+
+    # First-run: seed example files from bundle
+    for example in ("facts.example.yaml", "hooks.example.yaml"):
+        src = TEMPLATES_SRC.parent / example if TEMPLATES_SRC.exists() else PATHS_WORKSPACE / "facts.example.yaml"
+        dst = PATHS_WORKSPACE / example
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+
     _ensure_default_profile()
 
 

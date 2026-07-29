@@ -2,9 +2,8 @@
 
 import csv
 from datetime import datetime, timezone
-from pathlib import Path
 
-WORKSPACE = Path(__file__).parent.parent / "workspace"
+from app.paths import WORKSPACE
 LOG_PATH = WORKSPACE / "llm_usage.csv"
 
 

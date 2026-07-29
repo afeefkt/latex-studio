@@ -4,7 +4,6 @@ import difflib
 import json
 import logging
 import re
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -13,11 +12,12 @@ from pydantic import BaseModel
 from app.compile import compile_doc
 from app.docs import read_file, write_file
 from app.llm.provider import get_provider, list_available_models, list_providers
+from app.paths import PROMPTS_DIR
 
 logger = logging.getLogger("latex_studio.chat")
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-SYSTEM_PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "latex_mode.md"
+SYSTEM_PROMPT_PATH = PROMPTS_DIR / "latex_mode.md"
 _system_prompt_cache: str | None = None
 
 

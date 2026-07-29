@@ -3,7 +3,6 @@
 import json
 import logging
 import re
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -14,12 +13,13 @@ from app.docs import TEMPLATES, create_document, load_facts, render_template, te
 from app.guard.factbank import load_factbank
 from app.guard.validator import validate_assembled_text, validate_tailor_response
 from app.llm.provider import get_provider
+from app.paths import PROMPTS_DIR, WORKSPACE as PATHS_WORKSPACE
 from app.tracker import log_application, update_latest_cv
 
 logger = logging.getLogger("latex_studio.content")
 router = APIRouter(prefix="/api/content", tags=["content"])
 
-CONTENT_PROMPT_PATH = Path(__file__).parent / "llm" / "prompts" / "content_mode.md"
+CONTENT_PROMPT_PATH = PROMPTS_DIR / "content_mode.md"
 _prompt_cache: str | None = None
 
 
@@ -33,7 +33,7 @@ def _load_content_prompt() -> str:
     return _prompt_cache
 
 
-HOOKS_PATH = Path(__file__).parent.parent / "workspace" / "hooks.yaml"
+HOOKS_PATH = PATHS_WORKSPACE / "hooks.yaml"
 
 
 def _load_hooks() -> dict:
@@ -1113,7 +1113,7 @@ async def map_template(body: MapTemplateRequest):
             yield f"event: status\ndata: {json.dumps({'step': 'validating', 'message': 'Rendering adapter against your fact bank to check for hallucinations...'})}\n\n"
 
             # Save as a temporary template to validate
-            tpl_dir = Path(__file__).parent.parent / "workspace" / "templates" / template_name
+            tpl_dir = PATHS_WORKSPACE / "templates" / template_name
             tpl_dir.mkdir(parents=True, exist_ok=True)
             (tpl_dir / "main.tex.j2").write_text(j2_content, encoding="utf-8")
             (tpl_dir / "template.json").write_text(json.dumps({

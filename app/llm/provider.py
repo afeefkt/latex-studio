@@ -6,7 +6,10 @@ from typing import AsyncIterator
 
 from dotenv import load_dotenv
 
-load_dotenv()
+from app.paths import DATA_ROOT
+
+load_dotenv(DATA_ROOT / ".env")
+load_dotenv()  # fallback to cwd for dev convenience
 
 
 class LLMProvider(ABC):

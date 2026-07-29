@@ -1,9 +1,8 @@
 """Importer: parse work history text into facts.yaml structure."""
 
 import re
-from pathlib import Path
 
-WORKSPACE = Path(__file__).parent.parent / "workspace"
+from app.paths import WORKSPACE
 
 # Patterns for extracting role information from text
 ROLE_HEADER_RE = re.compile(

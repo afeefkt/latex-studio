@@ -1,15 +1,15 @@
 # ── Phase 4: Anti-hallucination validator ──
 
 import re
-from pathlib import Path
 
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from app.guard.factbank import FactBank, load_factbank
 from app.guard.models import TailorResponse, ValidationIssue, ValidationResult
+from app.paths import GUARD_DIR
 
-_RULES_PATH = Path(__file__).parent / "rules.yaml"
+_RULES_PATH = GUARD_DIR / "rules.yaml"
 _rules = yaml.safe_load(_RULES_PATH.read_text(encoding="utf-8")) if _RULES_PATH.exists() else {}
 
 HOOK_KEYS: set[str] = set(_rules.get("hook_keys", []))
