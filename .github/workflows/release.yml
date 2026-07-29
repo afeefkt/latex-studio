@@ -31,6 +31,7 @@ jobs:
         with:
           name: windows-installer
           path: dist/installer/*.exe
+          if-no-files-found: error
 
   build-macos-arm64:
     runs-on: macos-14
