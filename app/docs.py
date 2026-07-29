@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import stat
+from pathlib import Path
 
 import jinja2
 import yaml

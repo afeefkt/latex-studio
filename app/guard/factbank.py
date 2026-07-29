@@ -1,6 +1,7 @@
 # ── Phase 4: FactBank — load + index facts.yaml ──
 
 import re
+from pathlib import Path
 
 import yaml
 
