@@ -15,5 +15,6 @@ def _open_browser():
 
 
 if __name__ == "__main__":
+    from app.main import app
     threading.Thread(target=_open_browser, daemon=True).start()
-    uvicorn.run("app.main:app", host="127.0.0.1", port=PORT, reload=False)
+    uvicorn.run(app, host="127.0.0.1", port=PORT, reload=False)
