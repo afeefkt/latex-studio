@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.paths import WORKSPACE as PATHS_WORKSPACE
 
