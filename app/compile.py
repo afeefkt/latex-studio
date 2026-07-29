@@ -6,12 +6,11 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
 
-BASE_WORKSPACE = Path(__file__).parent.parent / "workspace"
+from app.paths import WORKSPACE as PATHS_WORKSPACE
 
 
-def _workspace() -> Path:
+def _workspace():
     """Resolve the active workspace root at call time.
 
     app.docs rebinds its module-level WORKSPACE to workspace/<profile>/ when a
@@ -23,7 +22,7 @@ def _workspace() -> Path:
         import app.docs as _docs
         return _docs.WORKSPACE
     except Exception:
-        return BASE_WORKSPACE
+        return PATHS_WORKSPACE
 
 # MiKTeX installs to a user-local path that isn't always on PATH.
 _MIKTEX_CANDIDATES = [

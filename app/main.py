@@ -1,10 +1,10 @@
 import subprocess
-from pathlib import Path
 
 import app.compile  # noqa: F401 -- triggers MiKTeX PATH patch on import
 import app.docs as docs
 from app.chat import router as chat_router
 from app.content import router as content_router
+from app.paths import STATIC_DIR
 from app.tracker import list_applications as tracker_list, update_application as tracker_update
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -35,8 +35,7 @@ from app.importer import import_to_facts
 
 app = FastAPI(title="LaTeX Studio")
 
-STATIC = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(chat_router)
 app.include_router(content_router)
 
@@ -334,4 +333,4 @@ async def update_application(index: int, body: UpdateAppBody):
 
 @app.get("/{full_path:path}")
 async def spa(full_path: str):
-    return FileResponse(str(STATIC / "index.html"))
+    return FileResponse(str(STATIC_DIR / "index.html"))

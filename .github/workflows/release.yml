@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build with PyInstaller
+        run: pyinstaller LaTeXStudio.spec
+      - name: Install Inno Setup
+        uses: crazy-max/ghaction-chocolatey@v3
+        with:
+          args: install innosetup --no-progress
+      - name: Build Windows installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion="${{ github.ref_name }}" installer/windows.iss
+        shell: pwsh
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/installer/*.exe
+
+  build-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build with PyInstaller
+        run: pyinstaller LaTeXStudio.spec
+      - name: Create DMG
+        run: bash installer/macos.sh "${{ github.ref_name }}"
+      - name: Upload macOS ARM64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: dist/*.dmg
+
+  build-macos-x86:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build with PyInstaller
+        run: pyinstaller LaTeXStudio.spec
+      - name: Create DMG
+        run: bash installer/macos.sh "${{ github.ref_name }}"
+      - name: Upload macOS x86 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86-dmg
+          path: dist/*.dmg
+
+  create-release:
+    needs: [build-windows, build-macos-arm64, build-macos-x86]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Create GitHub Release
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            windows-installer/*.exe \
+            macos-arm64-dmg/*.dmg \
+            macos-x86-dmg/*.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
