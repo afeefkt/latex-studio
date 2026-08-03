@@ -133,17 +133,47 @@ def _rule_2_fact_ids(parsed: TailorResponse, facts: FactBank, errors: list) -> N
             ))
 
 
-# ── Rule 3: focus_phrase appears in job ad ─────────────────────────────────────
+# ── Rule 3: focus_phrase appears in job ad (fuzzy subsequence) ─────────────────
+
+STOPWORDS: set[str] = {
+    "i", "me", "my", "we", "our", "the", "a", "an", "and", "or", "but",
+    "in", "on", "at", "to", "for", "of", "with", "from", "by", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
+    "did", "will", "would", "could", "should", "may", "might", "can", "shall",
+    "not", "no", "nor", "so", "if", "then", "than", "that", "this", "these",
+    "those", "it", "its", "he", "she", "they", "them",
+}
+
+FOCUS_SUBSEQUENCE_THRESHOLD: float = 0.6
+
+
+def _token_subsequence_match(phrase: str, ad: str, threshold: float = FOCUS_SUBSEQUENCE_THRESHOLD) -> bool:
+    """True if >=threshold fraction of meaningful phrase tokens
+    appear in-order (not necessarily contiguously) in ad text."""
+    p_tokens = [t for t in phrase.split() if len(t) > 2 and t not in STOPWORDS]
+    if not p_tokens:
+        return True
+    ad_tokens = ad.split()
+    i, matched = 0, 0
+    for ad_tok in ad_tokens:
+        if i >= len(p_tokens):
+            break
+        pt = p_tokens[i]
+        if pt == ad_tok or pt in ad_tok or (len(ad_tok) > 2 and ad_tok in pt):
+            matched += 1
+            i += 1
+    return (matched / len(p_tokens)) >= threshold
+
 
 def _rule_3_focus_phrase(parsed: TailorResponse, job_ad_text: str, errors: list) -> None:
     phrase = " ".join(parsed.focus_phrase.split()).lower()
     ad = " ".join(job_ad_text.split()).lower()
 
-    if phrase and phrase not in ad:
+    if phrase and not _token_subsequence_match(phrase, ad):
         errors.append(ValidationIssue(
             rule=3, severity="error",
-            message="focus_phrase not found in job ad text",
-            detail=f"Phrase: '{parsed.focus_phrase}'",
+            message="focus_phrase tokens not found in-order in job ad text",
+            detail=f"Phrase: '{parsed.focus_phrase}'. Must contain >=60% meaningful tokens from the JD.",
         ))
 
 
@@ -268,7 +298,34 @@ def _rule_8_length(text: str, warnings: list) -> None:
 
 # ── Rule 9: No false certifications, clearances, or degrees ────────────────────
 
-def _rule_9_certifications(text: str, facts: FactBank, errors: list) -> None:
+def _cert_patterns_for_language(language: str) -> tuple[list[re.Pattern], bool]:
+    """Return (patterns, is_fallback) for a language code.
+
+    certification_patterns may be flat (backward-compat, treated as en) or
+    language-keyed: {"en": [...], "de": [...]}.
+    """
+    raw = _rules.get("certification_patterns", [])
+    if isinstance(raw, list):
+        return CERT_PATTERNS, False
+    if isinstance(raw, dict):
+        pats = raw.get(language)
+        if pats:
+            return [re.compile(p) for p in pats], False
+        return CERT_PATTERNS, True  # fallback to en
+    return CERT_PATTERNS, False
+
+
+def _rule_9_certifications(text: str, facts: FactBank, errors: list,
+                           warnings: list | None = None,
+                           language: str = "en") -> None:
+    patterns, is_fallback = _cert_patterns_for_language(language)
+    if is_fallback and warnings is not None:
+        warnings.append(ValidationIssue(
+            rule=9, severity="warning",
+            message=f"No certification patterns defined for language '{language}' — using English patterns",
+            detail="Add per-language patterns to rules.yaml for full coverage.",
+        ))
+
     all_certs: set[str] = set()
 
     for cp in facts.certifications_held:
@@ -280,16 +337,14 @@ def _rule_9_certifications(text: str, facts: FactBank, errors: list) -> None:
             if claimable:
                 all_certs.add(claimable.lower().strip())
 
-    for pattern in CERT_PATTERNS:
+    for pattern in patterns:
         for m in pattern.finditer(text):
             cert_name = m.group(1).strip().lower() if m.lastindex else ""
             if not cert_name:
                 continue
-            # Normalise
             cert_name = " ".join(cert_name.split())
             if cert_name in all_certs:
                 continue
-            # Check if any known cert is a substring
             matched = False
             for known in all_certs:
                 if known and (known in cert_name or cert_name in known):
@@ -309,6 +364,7 @@ def validate_assembled_text(
     text: str,
     job_ad_text: str,
     facts: FactBank | None = None,
+    language: str = "en",
 ) -> ValidationResult:
     """Run guard rules 5-9 on assembled letter text. For preview/edit flows."""
     if facts is None:
@@ -321,7 +377,37 @@ def validate_assembled_text(
     _rule_6_numbers(text, facts, errors)
     _rule_7_entities(text, facts, job_ad_text, warnings)
     _rule_8_length(text, warnings)
-    _rule_9_certifications(text, facts, errors)
+    _rule_9_certifications(text, facts, errors, language=language)
+
+    return ValidationResult(
+        passed=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+    )
+
+
+def validate_write_gate(
+    text: str,
+    facts: FactBank | None = None,
+    language: str = "en",
+) -> ValidationResult:
+    """Run only the blocking guard rules (5 and 9) on text before writing.
+
+    Rules 5 (banned claims) and 9 (false certifications) encode "professionally
+    or legally dangerous". Rules 6/7/8 encode "this looks off" — useful advice
+    but not worth blocking a legitimate hand-edit or translated output.
+
+    Called by /generate and /translate to gate writes. Returns a ValidationResult
+    suitable for a 422 or to fold into the translate return.
+    """
+    if facts is None:
+        facts = load_factbank()
+
+    errors: list[ValidationIssue] = []
+    warnings: list[ValidationIssue] = []
+
+    _rule_5_banned_claims(text, facts, errors)
+    _rule_9_certifications(text, facts, errors, warnings=warnings, language=language)
 
     return ValidationResult(
         passed=len(errors) == 0,

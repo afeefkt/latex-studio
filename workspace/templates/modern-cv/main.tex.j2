@@ -3,7 +3,7 @@
 
 \usepackage[left=22mm, right=22mm, top=18mm, bottom=18mm]{geometry}
 \usepackage{fontspec}
-\usepackage[english]{babel}
+\usepackage[\VAR{ babel_lang | default('english') }]{babel}
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{titlesec}
@@ -46,11 +46,11 @@
 {\color{accent!40}\hrule height 0.6pt}
 
 % ── Professional Summary ──
-\section{Professional Summary}
+\section{\VAR{ L.get(language, {}).get('summary', 'Professional Summary') }}
 \VAR{ facts.identity.about | tex_escape }
 
 % ── Work Experience ──
-\section{Work Experience}
+\section{\VAR{ L.get(language, {}).get('experience', 'Work Experience') }}
 \BLOCK{ for role in facts.roles }
 \textbf{\VAR{ role.title | tex_escape }} \textbar{} \VAR{ role.org | tex_escape } \hfill \VAR{ role.dates | tex_escape } \\
 \BLOCK{ if role.location }\textit{\VAR{ role.location | tex_escape }} \\
@@ -64,13 +64,13 @@
 \BLOCK{ endfor }
 
 % ── Skills ──
-\section{Skills}
+\section{\VAR{ L.get(language, {}).get('skills', 'Skills') }}
 \textbf{Expert:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\[4pt]
 \textbf{Proficient:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\[4pt]
 \textbf{Familiar:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
 
 % ── Education ──
-\section{Education}
+\section{\VAR{ L.get(language, {}).get('education', 'Education') }}
 \BLOCK{ for edu in facts.education }
 \textbf{\VAR{ edu.degree | tex_escape }} — \VAR{ edu.institution | tex_escape } \hfill \VAR{ edu.years | tex_escape } \\
 \BLOCK{ if edu.focus }
@@ -80,13 +80,13 @@
 \BLOCK{ endfor }
 
 % ── Languages ──
-\section{Languages}
+\section{\VAR{ L.get(language, {}).get('languages', 'Languages') }}
 \BLOCK{ for lang in facts.languages }
 \VAR{ lang.lang | tex_escape } (\VAR{ lang.level | tex_escape })\BLOCK{ if not loop.last } \textbar{} \BLOCK{ endif }
 \BLOCK{ endfor }
 
 \BLOCK{ if facts.awards }
-\section{Awards}
+\section{\VAR{ L.get(language, {}).get('awards', 'Awards') }}
 \BLOCK{ for award in facts.awards }
 \textbf{\VAR{ award.title | tex_escape }} \hfill \VAR{ award.year | tex_escape } \\
 \VAR{ award.org | tex_escape } \\

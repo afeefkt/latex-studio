@@ -17,6 +17,7 @@ a = Analysis(
         ("workspace/templates", "workspace/templates"),
         ("workspace/facts.example.yaml", "workspace"),
         ("workspace/hooks.example.yaml", "workspace"),
+        ("workspace/i18n", "workspace/i18n"),
     ],
     hiddenimports=[
         "uvicorn.protocols.http.h11_impl",

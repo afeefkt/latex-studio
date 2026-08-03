@@ -11,7 +11,7 @@
 ]{scrlttr2}
 
 \usepackage{fontspec}
-\usepackage[english]{babel}
+\usepackage[\VAR{ babel_lang | default('english') }]{babel}
 \usepackage{hyperref}
 
 \setkomavar{fromname}{\VAR{ sender_name | tex_escape }}
@@ -43,7 +43,10 @@
 
 \BLOCK{ endfor }
 \BLOCK{ endif }
-I would be glad to walk through any of this in more detail, and I can arrange a call at short notice.
+\BLOCK{ if closing_sentence }
+\VAR{ closing_sentence | tex_escape }
+
+\BLOCK{ endif }
 
 \closing{\VAR{ closing | tex_escape }}
 

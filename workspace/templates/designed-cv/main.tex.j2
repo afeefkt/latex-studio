@@ -8,6 +8,7 @@
 
 \ifxetexorluatex
 	\usepackage{fontspec}
+	\usepackage[\VAR{ babel_lang | default('english') }]{babel}
 	\defaultfontfeatures{Ligatures=TeX}
 \else
 	\usepackage[utf8]{inputenc}
@@ -84,18 +85,18 @@
 
 \addtofrontsidebar{
 	\graphicspath{{pics/flags/}}
-	\profilesection{About Me}
+	\profilesection{\VAR{ L.get(language, {}).get('profile', 'About Me') }}
 	\#{ \aboutme defers typesetting into a \parbox, so \RaggedRight has to go }
 	\#{ inside the argument. Justified text this narrow leaves badness-10000 gaps. }
 	\aboutme{\RaggedRight
 		\VAR{ facts.identity.about | tex_escape }
 	}
-	\profilesection{Languages}
+	\profilesection{\VAR{ L.get(language, {}).get('languages', 'Languages') }}
 \BLOCK{ for lang in language_rows }
 	\pointskill{\BLOCK{ if lang.flag }\flag{\VAR{ lang.flag }.png}\BLOCK{ else }\faLanguage\BLOCK{ endif }}{\VAR{ lang.name | tex_escape }\BLOCK{ if lang.level } \textendash{} \VAR{ lang.level | tex_escape }\BLOCK{ endif }}{\VAR{ lang.dots }}
 \BLOCK{ endfor }
 
-	\profilesection{Skills}
+	\profilesection{\VAR{ L.get(language, {}).get('skills', 'Skills') }}
 \#{ Bar length is proficiency (from the facts.yaml tier), not JD relevance. }
 \#{ Relevance decides which skills appear here and in what order. }
 \BLOCK{ for skill in matched_skills }
@@ -109,7 +110,7 @@
 \BLOCK{ endif }
 \BLOCK{ if facts.hobbies }
 
-	\profilesection{Hobbies}
+	\profilesection{\VAR{ L.get(language, {}).get('hobbies', 'Hobbies') }}
 \#{ An entry is a plain string, or a mapping with text and icon keys. }
 \#{ NB: comment_end_string is a bare brace, so never write one inside a comment. }
 \BLOCK{ for hobby in facts.hobbies }
@@ -120,7 +121,7 @@
 
 \addtobacksidebar{
 	\RaggedRight
-	\profilesection{Key Skills}
+	\profilesection{\VAR{ L.get(language, {}).get('skills', 'Key Skills') }}
 	\begin{sidebarminipage}
 \BLOCK{ for skill in matched_skills[:8] }
 		\chartlabel{\VAR{ skill.name | tex_escape }}
@@ -131,7 +132,7 @@
 \begin{document}
 \makefrontsidebar
 
-\cvsection{Relevant Experience}
+\cvsection{\VAR{ L.get(language, {}).get('experience', 'Relevant Experience') }}
 \begin{cvtable}[2]
 \#{ One cvitem per ROLE. Iterating bullets here instead would repeat the role }
 \#{ header once per bullet and scramble the chronology. }
@@ -149,7 +150,7 @@
 \end{cvtable}
 
 \BLOCK{ if facts.education }
-\cvsection{Education}
+\cvsection{\VAR{ L.get(language, {}).get('education', 'Education') }}
 \begin{cvtable}[1.5]
 \BLOCK{ for edu in facts.education }
 	\cvitem{\VAR{ edu.years | tex_escape }}{\VAR{ edu.degree | tex_escape }}{\VAR{ edu.institution | tex_escape }}
@@ -159,7 +160,7 @@
 \BLOCK{ endif }
 
 \BLOCK{ if facts.awards }
-\cvsection{Awards}
+\cvsection{\VAR{ L.get(language, {}).get('awards', 'Awards') }}
 \begin{cvtable}
 \BLOCK{ for award in facts.awards }
 	\cvitem{\VAR{ award.year | tex_escape }}{\VAR{ award.title | tex_escape }}{\VAR{ award.org | tex_escape }}{\VAR{ award.description | tex_escape }}

@@ -2,9 +2,16 @@
 
 import json
 import os
+import ssl
 from typing import AsyncIterator
 
 import httpx
+
+try:
+    import truststore
+    _ssl_ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+except Exception:
+    _ssl_ctx = True  # httpx default
 
 from app.llm.provider import LLMProvider
 from app.usage_log import log_usage
@@ -25,6 +32,7 @@ class OpenAICompatProvider(LLMProvider):
                 "Content-Type": "application/json",
             },
             timeout=120.0,
+            verify=_ssl_ctx,
         )
 
     def _get_api_key(self) -> str:

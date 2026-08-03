@@ -2,6 +2,7 @@
 
 \usepackage[left=20mm, right=20mm, top=20mm, bottom=20mm]{geometry}
 \usepackage{fontspec}
+\usepackage[\VAR{ babel_lang | default('english') }]{babel}
 \defaultfontfeatures{Ligatures=TeX}
 \usepackage{hyperref}
 \usepackage{enumitem}
@@ -30,10 +31,10 @@
   \href{\VAR{ facts.identity.linkedin | tex_escape }}{LinkedIn} \,|\, \href{\VAR{ facts.identity.github | tex_escape }}{GitHub}
 \end{center}
 
-\sectionheader{Professional Summary}
+\sectionheader{\VAR{ L.get(language, {}).get('summary', 'Professional Summary') }}
 \VAR{ facts.identity.about | tex_escape }
 
-\sectionheader{Work Experience}
+\sectionheader{\VAR{ L.get(language, {}).get('experience', 'Work Experience') }}
 \#{ role_groups is the tailored view: every role, but only the bullets selected }
 \#{ for this job. Falls back to the full fact bank when rendered untailored.     }
 \BLOCK{ for role in (role_groups or facts.roles) }
@@ -50,7 +51,7 @@
 \medskip
 \BLOCK{ endfor }
 
-\sectionheader{Education}
+\sectionheader{\VAR{ L.get(language, {}).get('education', 'Education') }}
 \BLOCK{ for edu in facts.education }
 \textbf{\VAR{ edu.degree | tex_escape }} -- \VAR{ edu.institution | tex_escape }\BLOCK{ if edu.location }, \VAR{ edu.location | tex_escape }\BLOCK{ endif } \hfill \VAR{ edu.years | tex_escape }
 \BLOCK{ if edu.focus }
@@ -59,7 +60,7 @@
 \medskip
 \BLOCK{ endfor }
 
-\sectionheader{Skills}
+\sectionheader{\VAR{ L.get(language, {}).get('skills', 'Skills') }}
 \BLOCK{ if facts.skills.expert }
 \textbf{Expert:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\
 \BLOCK{ endif }
@@ -71,7 +72,7 @@
 \BLOCK{ endif }
 
 \BLOCK{ if facts.awards }
-\sectionheader{Awards}
+\sectionheader{\VAR{ L.get(language, {}).get('awards', 'Awards') }}
 \BLOCK{ for award in facts.awards }
 \textbf{\VAR{ award.title | tex_escape }} \hfill \VAR{ award.year | tex_escape } \\
 \VAR{ award.org | tex_escape }
@@ -81,7 +82,7 @@
 \BLOCK{ endfor }
 \BLOCK{ endif }
 
-\sectionheader{Languages}
+\sectionheader{\VAR{ L.get(language, {}).get('languages', 'Languages') }}
 \BLOCK{ for lang in facts.languages }
 \VAR{ lang.lang | tex_escape } (\VAR{ lang.level | tex_escape })\BLOCK{ if not loop.last } \,|\, \BLOCK{ endif }
 \BLOCK{ endfor }

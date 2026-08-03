@@ -66,26 +66,84 @@
         <div id="fit-report"></div>
       </section>
 
-      <!-- STEP 3 — channel choice + template picker -->
+      <!-- STEP 3 — generation options -->
       <section class="apply-step hidden" id="apply-step-3">
-        <h2><span class="step-num">3</span> Where is this application going?</h2>
-        <div id="channel-choice">
-          <button class="channel-btn" id="btn-channel-portal" data-channel="portal">
-            <span class="channel-title">🏢 Company portal</span>
-            <span class="channel-sub">ATS-safe single column. Use for Airbus, Liebherr, Lufthansa Technik and any careers-page upload.</span>
-            <select class="channel-template" id="portal-template-select" data-channel="portal">
-              <option value="ats-cv">ATS CV (default)</option>
-            </select>
-          </button>
-          <button class="channel-btn" id="btn-channel-email" data-channel="email">
-            <span class="channel-title">✉️ Email or recruiter</span>
-            <span class="channel-sub">Designed layout. Use when a human opens the file directly.</span>
-            <select class="channel-template" id="email-template-select" data-channel="email">
-              <option value="optimized-cv">Optimised CV (default)</option>
+        <h2><span class="step-num">3</span> Generation options</h2>
+        <div class="gen-options">
+
+          <!-- Channel choice (radios styled as cards) -->
+          <div class="gen-opt" id="opt-channel">
+            <label class="gen-opt-label">Channel</label>
+            <div class="gen-opt-cards">
+              <label class="radio-card" for="ch-portal">
+                <input type="radio" name="channel" id="ch-portal" value="portal" checked>
+                <div class="radio-card-body">
+                  <span class="radio-card-title">🏢 Company portal</span>
+                  <span class="radio-card-sub">ATS-safe single column. Use for Airbus, Liebherr, Lufthansa Technik and any careers-page upload.</span>
+                </div>
+              </label>
+              <label class="radio-card" for="ch-email">
+                <input type="radio" name="channel" id="ch-email" value="email">
+                <div class="radio-card-body">
+                  <span class="radio-card-title">✉️ Email or recruiter</span>
+                  <span class="radio-card-sub">Designed layout. Use when a human opens the file directly.</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Documents checkboxes -->
+          <div class="gen-opt" id="opt-documents">
+            <label class="gen-opt-label">Documents</label>
+            <div class="gen-opt-checks">
+              <label class="checkbox-row">
+                <input type="checkbox" name="doc-letter" id="doc-letter" checked>
+                <span>Cover letter</span>
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" name="doc-cv" id="doc-cv" checked>
+                <span>CV</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- CV template select -->
+          <div class="gen-opt" id="opt-cv-template-row">
+            <label class="gen-opt-label" for="opt-cv-template">CV layout</label>
+            <select id="opt-cv-template">
+              <option value="ats-cv">ATS CV</option>
+              <option value="optimized-cv">Optimised CV</option>
               <option value="designed-cv">Designed CV</option>
               <option value="modern-cv">Modern CV</option>
             </select>
-          </button>
+          </div>
+
+          <!-- Letter template select (hidden until >1 letter template exists) -->
+          <div class="gen-opt hidden" id="opt-letter-template-row">
+            <label class="gen-opt-label" for="opt-letter-template">Letter layout</label>
+            <select id="opt-letter-template">
+              <option value="scrlttr2-letter">Cover Letter</option>
+            </select>
+          </div>
+
+          <!-- Output language -->
+          <div class="gen-opt" id="opt-language-row">
+            <label class="gen-opt-label" for="opt-language">Output language</label>
+            <select id="opt-language">
+              <option value="en">English</option>
+            </select>
+          </div>
+
+          <!-- Translate row (hidden until non-English selected) -->
+          <div class="gen-opt hidden" id="translate-row">
+            <button id="btn-translate" class="btn-primary">Translate</button>
+            <span id="translate-status"></span>
+          </div>
+
+        </div>
+
+        <div class="apply-actions" style="margin-top:16px">
+          <button id="btn-generate" class="btn-primary">Generate</button>
         </div>
         <div id="generate-status"></div>
       </section>
@@ -110,6 +168,10 @@
       <nav id="doc-list">
         <div class="sidebar-empty">Loading…</div>
       </nav>
+      <div id="template-list-section">
+        <div class="doc-section-header">📋 Templates <span id="template-list-count" class="doc-section-count">0</span></div>
+        <div id="template-list"></div>
+      </div>
     </aside>
 
     <!-- Workspace -->

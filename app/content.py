@@ -9,12 +9,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.compile import compile_doc
-from app.docs import TEMPLATES, create_document, load_facts, render_template, tex_escape
+from app.docs import TEMPLATES, create_document, list_templates, load_facts, render_template, tex_escape
 from app.guard.factbank import load_factbank
 from app.guard.validator import validate_assembled_text, validate_tailor_response
 from app.llm.provider import get_provider
 from app.paths import PROMPTS_DIR, WORKSPACE as PATHS_WORKSPACE
 from app.tracker import log_application, update_latest_cv
+from app.i18n import SUPPORTED as _LANGUAGES, get_language
 
 logger = logging.getLogger("latex_studio.content")
 router = APIRouter(prefix="/api/content", tags=["content"])
@@ -34,6 +35,148 @@ def _load_content_prompt() -> str:
 
 
 HOOKS_PATH = PATHS_WORKSPACE / "hooks.yaml"
+CHROME_PATH = PATHS_WORKSPACE / "i18n" / "letter_chrome.yaml"
+LABELS_PATH = PATHS_WORKSPACE / "i18n" / "labels.yaml"
+
+
+# ── Template resolution ────────────────────────────────────────────────────────
+
+def _resolve_template(template_id: str, want_kind: str) -> str:
+    """Validate and canonicalise a user-facing template id.
+
+    Returns the template id unchanged on success.
+    Raises 400 for unknown ids or a kind mismatch.
+    """
+    if not template_id or "/" in template_id or "\\" in template_id or template_id.startswith("."):
+        raise HTTPException(400, f"Invalid template id: '{template_id}'")
+
+    all_templates = {t["id"]: t for t in list_templates()}
+    info = all_templates.get(template_id)
+    if not info:
+        known = ", ".join(sorted(all_templates.keys()))
+        raise HTTPException(400, f"Unknown template '{template_id}'. Known: {known}")
+    if not info.get("has_template"):
+        raise HTTPException(400, f"Template '{template_id}' has no renderable source")
+
+    kind = info.get("kind", "cv")
+    if want_kind == "letter" and kind != "letter":
+        raise HTTPException(
+            400,
+            f"'{template_id}' is a {kind} template, not a letter template. "
+            f"Letter templates: {', '.join(k for k, v in all_templates.items() if v.get('kind') == 'letter')}",
+        )
+    if want_kind == "cv" and kind != "cv":
+        raise HTTPException(
+            400,
+            f"'{template_id}' is a {kind} template, not a CV template.",
+        )
+
+    return template_id
+
+
+# ── Letter chrome (per-language salutation, subject, closing) ───────────────────
+
+def _load_letter_chrome() -> dict:
+    if not CHROME_PATH.exists():
+        return {}
+    import yaml as _yaml
+    return _yaml.safe_load(CHROME_PATH.read_text(encoding="utf-8")) or {}
+
+
+def _load_labels() -> dict:
+    if not LABELS_PATH.exists():
+        return {}
+    import yaml as _yaml
+    return _yaml.safe_load(LABELS_PATH.read_text(encoding="utf-8")) or {}
+
+
+def _letter_chrome(lang_code: str) -> dict:
+    """Return the chrome dict for a language, falling back to English."""
+    chrome_all = _load_letter_chrome()
+    return chrome_all.get(lang_code) or chrome_all.get("en", {})
+
+
+def _letter_vars(
+    company: str,
+    role: str,
+    location: str,
+    focus_phrase: str,
+    hook_key: str,
+    facts: dict,
+    bullet_texts: list[dict],
+    edited_body: str | None = None,
+    language: str = "en",
+) -> dict:
+    """Build template variables for a cover letter. Used by /tailor and /generate."""
+    identity = facts.get("identity", {})
+    chrome = _letter_chrome(language)
+    labels = _load_labels()
+
+    subject = chrome.get("subject", "Application for {role_title}").replace(
+        "{role_title}", role
+    )
+    opening = chrome.get("opening", "Dear Hiring Team at {company_name},").replace(
+        "{company_name}", company
+    )
+    closing = chrome.get("closing", "Sincerely,")
+    closing_sentence = chrome.get("closing_sentence", "")
+    if closing_sentence:
+        closing_sentence = closing_sentence.replace("{company_name}", company)
+
+    lang_info = get_language(language)
+    babel_lang = lang_info.babel if lang_info else "english"
+
+    return {
+        "sender_name": identity.get("name", ""),
+        "sender_address": identity.get("address", identity.get("location", "")),
+        "sender_email": identity.get("email", ""),
+        "sender_phone": identity.get("phone", ""),
+        "recipient_name": f"Hiring Manager at {company}",
+        "recipient_company": company,
+        "recipient_address": location,
+        "subject": subject,
+        "opening": opening,
+        "closing": closing,
+        "closing_sentence": closing_sentence,
+        "edited_body": edited_body,
+        "selected_bullets": bullet_texts if not edited_body else [],
+        "company_name": company,
+        "role_title": role,
+        "focus_phrase": focus_phrase,
+        "hook_key": hook_key,
+        "hook_text": _build_hook_text(hook_key, company, role, focus_phrase, language),
+        "about_company": f"at {company}",
+        "babel_lang": babel_lang,
+        "language": language,
+        "L": labels,
+    }
+
+
+def _cv_vars(facts: dict, bullet_ids: list[str], optimized_map: dict,
+             job_ad_text: str = "", matched_phrases: list[str] | None = None,
+             language: str = "en") -> dict:
+    """Build template variables for a CV."""
+    role_groups = _group_bullets_by_role(facts, bullet_ids)
+    for rg in role_groups:
+        for b in rg["bullets"]:
+            if b["id"] in optimized_map:
+                b["text"] = optimized_map[b["id"]]
+
+    matched_skills, other_skills = _split_skills(
+        facts, role_groups,
+        jd_text=job_ad_text,
+        matched_phrases=matched_phrases,
+    )
+    labels = _load_labels()
+    return {
+        "facts": facts,
+        "role_groups": role_groups,
+        "matched_skills": matched_skills,
+        "other_skills": other_skills,
+        "language_rows": _language_rows(facts),
+        "language": language,
+        "L": labels,
+    }
 
 
 def _load_hooks() -> dict:
@@ -44,7 +187,7 @@ def _load_hooks() -> dict:
     return _yaml.safe_load(HOOKS_PATH.read_text(encoding="utf-8")) or {}
 
 
-def _build_hook_text(hook_key: str, company_name: str, role_title: str, focus_phrase: str) -> str:
+def _build_hook_text(hook_key: str, company_name: str, role_title: str, focus_phrase: str, language: str = "en") -> str:
     """
     Render the opening paragraph for a validated hook_key.
 
@@ -53,10 +196,19 @@ def _build_hook_text(hook_key: str, company_name: str, role_title: str, focus_ph
     Slot values are LaTeX-escaped before substitution, so the result is already safe
     and must NOT be passed through tex_escape again in the template.
 
+    Hooks are stored flat (compatible with hooks.example.yaml) or per-language.
     Uses replace() rather than format() so braces in hook prose don't blow up.
     """
     hooks = _load_hooks()
-    template = hooks.get(hook_key, "")
+
+    # Try per-language key first, fall back to flat key
+    template = ""
+    if language != "en":
+        per_lang = hooks.get(language, {})
+        if isinstance(per_lang, dict):
+            template = per_lang.get(hook_key, "")
+    if not template:
+        template = hooks.get(hook_key, "")
     if not template:
         logger.warning(f"No hook text for hook_key '{hook_key}' — opening paragraph omitted")
         return ""
@@ -272,27 +424,13 @@ async def tailor_letter(body: TailorRequest):
             focus_phrase = tailor_data.get("focus_phrase", "")
             hook_key = tailor_data.get("hook_key", "")
 
-            # Build template variables
-            identity = facts.get("identity", {})
-            template_vars = {
-                "sender_name": identity.get("name", ""),
-                "sender_address": identity.get("address", identity.get("location", "")),
-                "sender_email": identity.get("email", ""),
-                "sender_phone": identity.get("phone", ""),
-                "recipient_name": f"Hiring Manager at {company_name}",
-                "recipient_company": company_name,
-                "recipient_address": location,
-                "subject": f"Application for {role_title}",
-                "opening": f"Dear Hiring Team at {company_name},",
-                "closing": "Sincerely,",
-                "selected_bullets": bullet_texts,
-                "company_name": company_name,
-                "role_title": role_title,
-                "focus_phrase": focus_phrase,
-                "hook_key": hook_key,
-                "hook_text": _build_hook_text(hook_key, company_name, role_title, focus_phrase),
-                "about_company": f"at {company_name}",
-            }
+            template_vars = _letter_vars(
+                company=company_name, role=role_title, location=location,
+                focus_phrase=focus_phrase, hook_key=hook_key,
+                facts=facts, bullet_texts=bullet_texts,
+            )
+            # Add manual template-only fields and the rendered body
+            template_vars["selected_bullets"] = bullet_texts  # bodies block expects plain list
 
             # Render the letter template
             try:
@@ -360,9 +498,12 @@ async def tailor_letter(body: TailorRequest):
 
 
 class GenerateRequest(BaseModel):
-    """Everything /tailor returned, plus the channel the user picked."""
-    channel: str = "portal"                  # "portal" (ATS-safe) | "email" (designed)
-    cv_template: str = ""                    # template ID to use for CV (defaults based on channel)
+    """Everything /tailor returned, plus what the user chose in the Step 3 form."""
+    channel: str = "portal"
+    cv_template: str = ""
+    letter_template: str = ""               # defaults to "scrlttr2-letter"
+    documents: list[str] = ["letter", "cv"]  # subset of {"letter", "cv"}
+    language: str = "en"
     company_name: str = ""
     role_title: str = ""
     location: str = ""
@@ -373,21 +514,24 @@ class GenerateRequest(BaseModel):
     unmatched: list[str] = []
     matched_count: int = 0
     notes: str = ""
-    edited_body: str | None = None           # Hand-edited letter body from preview step
-    job_ad_text: str = ""                    # Ranks CV skills by relevance to this ad
-    matched_phrases: list[str] = []          # JD phrases the LLM matched, for the same ranking
+    edited_body: str | None = None
+    job_ad_text: str = ""
+    matched_phrases: list[str] = []
 
 
 def _slugify(text: str, fallback: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text or "").strip().lower()).strip("-") or fallback
 
 
-def _create_unique(base_name: str, template_id: str, variables: dict) -> dict:
+def _create_unique(base_name: str, template_id: str, variables: dict,
+                   origin: str = "manual", language: str = "en",
+                   company: str = "", role: str = "", channel: str = "") -> dict:
     """create_document, retrying with a numeric suffix when the folder already exists."""
     name = base_name
     for attempt in range(2, 100):
         try:
-            return create_document(name, template_id, variables)
+            return create_document(name, template_id, variables, origin=origin,
+                                   language=language, company=company, role=role, channel=channel)
         except FileExistsError:
             name = f"{base_name}-{attempt}"
     raise HTTPException(500, f"Could not find a free document name for '{base_name}'")
@@ -404,11 +548,26 @@ def _pdf_filename(person: str, kind: str, company: str) -> str:
 @router.post("/generate")
 async def generate_documents(body: GenerateRequest):
     """
-    Create the cover letter and the CV in the variant matching the chosen channel,
-    compile both, log the application, and hand back download links.
+    Create the cover letter and/or CV, compile, log the application, and hand back
+    download links.
+
+    Controls: documents (subset of {"letter","cv"}), language (ISO 639-1 code),
+    cv_template / letter_template (validated against list_templates()).
 
     This is the only place documents are written. /tailor just analyses.
     """
+    # ── Input validation ──
+    if not body.documents:
+        raise HTTPException(400, "documents list is empty — pick at least one of 'letter' or 'cv'")
+    unknown = [d for d in body.documents if d not in ("letter", "cv")]
+    if unknown:
+        raise HTTPException(400, f"Invalid document kind(s): {', '.join(unknown)}. Must be 'letter' and/or 'cv'")
+
+    lang = get_language(body.language)
+    if lang is None:
+        codes = ", ".join(l.code for l in _LANGUAGES)
+        raise HTTPException(400, f"Unsupported language '{body.language}'. Supported: {codes}")
+
     facts = load_facts()
     if not facts:
         raise HTTPException(400, "facts.yaml not found or empty")
@@ -417,109 +576,129 @@ async def generate_documents(body: GenerateRequest):
     person = identity.get("name", "")
     company = body.company_name or "the company"
     role = body.role_title or "this position"
+    language = body.language
 
     bullet_texts = _get_bullet_texts(facts, body.selected_bullet_ids)
-    if not bullet_texts:
-        raise HTTPException(400, "No bullet text resolved from the selected IDs")
-
     optimized_map = {
         o["id"]: o["text"] for o in body.optimized_bullets if "id" in o and "text" in o
     }
+    # Apply optimized text — letter bullets use the same map below
     for bt in bullet_texts:
         if bt["id"] in optimized_map:
             bt["text"] = optimized_map[bt["id"]]
 
-    # ── Letter ──
-    letter_vars = {
-        "sender_name": person,
-        "sender_address": identity.get("address", identity.get("location", "")),
-        "sender_email": identity.get("email", ""),
-        "sender_phone": identity.get("phone", ""),
-        "recipient_name": f"Hiring Manager at {company}",
-        "recipient_company": company,
-        "recipient_address": body.location,
-        "subject": f"Application for {role}",
-        "opening": f"Dear Hiring Team at {company},",
-        "closing": "Sincerely,",
-        "edited_body": body.edited_body,
-        "selected_bullets": bullet_texts if not body.edited_body else [],
-        "company_name": company,
-        "role_title": role,
-        "focus_phrase": body.focus_phrase,
-        "hook_key": body.hook_key,
-        "hook_text": _build_hook_text(body.hook_key, company, role, body.focus_phrase),
-        "about_company": f"at {company}",
-    }
+    # ── Write gate: rules 5 & 9 on user-edited or translated body text ──
+    if body.edited_body:
+        from app.guard.validator import validate_write_gate
+        factbank = load_factbank()
+        gate = validate_write_gate(body.edited_body, factbank, body.language)
+        if not gate.passed:
+            raise HTTPException(422, detail={
+                "errors": [{"rule": e.rule, "message": e.message, "detail": e.detail}
+                           for e in gate.errors],
+            })
+
     slug = _slugify(f"{company}-{role}", "application")
-    letter_info = _create_unique(f"tailored_{slug}", "scrlttr2-letter", letter_vars)
 
-    # ── CV, in the variant that matches where it's going ──
-    ats = body.channel != "email"
-    # Use user-selected template if provided, else default per channel
-    cv_template = body.cv_template or ("ats-cv" if ats else "optimized-cv")
+    # ── Build document spec list lazily ──
+    # Each spec is a (kind, template_id, folder_name, variables) tuple.
+    # The CV block is only built when actually wanted — _group_bullets_by_role +
+    # _split_skills is wasted work otherwise.
+    specs: list[tuple[str, str, str, dict]] = []
 
-    role_groups = _group_bullets_by_role(facts, body.selected_bullet_ids)
-    for rg in role_groups:
-        for b in rg["bullets"]:
-            if b["id"] in optimized_map:
-                b["text"] = optimized_map[b["id"]]
+    want_letter = "letter" in body.documents
+    want_cv = "cv" in body.documents
 
-    matched_skills, other_skills = _split_skills(
-        facts, role_groups,
-        jd_text=body.job_ad_text,
-        matched_phrases=body.matched_phrases,
-    )
-    cv_vars = {
-        "facts": facts,
-        "role_groups": role_groups,
-        "selected_bullets": bullet_texts,
-        "matched_skills": matched_skills,
-        "other_skills": other_skills,
-        "language_rows": _language_rows(facts),
-    }
-    cv_info = _create_unique(f"cv_{slug}", cv_template, cv_vars)
+    if want_letter:
+        lt = body.letter_template or "scrlttr2-letter"
+        _resolve_template(lt, "letter")
+        letter_vars = _letter_vars(
+            company=company, role=role, location=body.location,
+            focus_phrase=body.focus_phrase, hook_key=body.hook_key,
+            facts=facts, bullet_texts=bullet_texts,
+            edited_body=body.edited_body, language=language,
+        )
+        specs.append(("letter", lt, f"tailored_{slug}", letter_vars))
 
-    # ── Compile both ──
-    results = {}
-    for key, info in (("letter", letter_info), ("cv", cv_info)):
+    if want_cv:
+        ats = body.channel != "email"
+        ct = body.cv_template or ("ats-cv" if ats else "optimized-cv")
+        _resolve_template(ct, "cv")
+        cv_vars = _cv_vars(
+            facts=facts, bullet_ids=body.selected_bullet_ids,
+            optimized_map=optimized_map,
+            job_ad_text=body.job_ad_text,
+            matched_phrases=body.matched_phrases,
+            language=language,
+        )
+        specs.append(("cv", ct, f"cv_{slug}", cv_vars))
+
+    # ── Create + compile each document ──
+    results: dict[str, dict] = {}
+    doc_info: dict[str, dict] = {}
+
+    for kind, template_id, folder_name, variables in specs:
+        try:
+            info = _create_unique(folder_name, template_id, variables, origin="apply",
+                                  language=language, company=company, role=role,
+                                  channel=body.channel)
+        except FileExistsError:
+            # _create_unique retries with a suffix — fallback in case it exhausts
+            raise HTTPException(500, f"Could not find a free document name for '{folder_name}'")
+        doc_info[kind] = info
+
         try:
             r = await compile_doc(info["path"])
-            results[key] = {
+            results[kind] = {
                 "success": r.success,
                 "errors": [{"line": e.line, "message": e.message} for e in r.errors[:5]],
+                "doc_path": info["path"],
+                "url": f"/api/pdf/{info['path']}",
+                "filename": _pdf_filename(
+                    person,
+                    "CoverLetter" if kind == "letter" else "CV",
+                    company,
+                ),
             }
         except Exception as e:
             logger.error(f"Compile failed for {info['path']}: {e}")
-            results[key] = {"success": False, "errors": [{"line": None, "message": str(e)}]}
+            results[kind] = {
+                "success": False,
+                "errors": [{"line": None, "message": str(e)}],
+                "doc_path": info["path"],
+                "url": f"/api/pdf/{info['path']}",
+                "filename": _pdf_filename(
+                    person,
+                    "CoverLetter" if kind == "letter" else "CV",
+                    company,
+                ),
+            }
 
+    # ── Log the application ──
+    letter_path = doc_info.get("letter", {}).get("path", "")
+    cv_path = doc_info.get("cv", {}).get("path", "")
     log_application(
-        company=company,
-        role=role,
-        location=body.location,
-        letter_path=letter_info["path"],
-        cv_path=cv_info["path"],
+        company=company, role=role, location=body.location,
+        letter_path=letter_path, cv_path=cv_path,
         matched_count=body.matched_count,
         unmatched_count=len(body.unmatched),
         unmatched_list="; ".join(body.unmatched),
         notes=body.notes,
+        language=language,
+        cv_template=body.cv_template or ("ats-cv" if body.channel != "email" else "optimized-cv"),
+        letter_template=body.letter_template or "scrlttr2-letter",
     )
 
+    # ── Response — null keys for skipped documents ──
+    ats = body.channel != "email"
     return {
         "created": True,
         "channel": "portal" if ats else "email",
         "cv_variant": "ATS-safe (single column)" if ats else "Designed (two column)",
-        "letter": {
-            "doc_path": letter_info["path"],
-            "url": f"/api/pdf/{letter_info['path']}",
-            "filename": _pdf_filename(person, "CoverLetter", company),
-            **results["letter"],
-        },
-        "cv": {
-            "doc_path": cv_info["path"],
-            "url": f"/api/pdf/{cv_info['path']}",
-            "filename": _pdf_filename(person, "CV", company),
-            **results["cv"],
-        },
+        "language": language,
+        "documents": body.documents,
+        "letter": results.get("letter"),
+        "cv": results.get("cv"),
     }
 
 
@@ -834,6 +1013,7 @@ def _get_bullet_texts(facts: dict, bullet_ids: list[str]) -> list[dict]:
 class PreviewCheckRequest(BaseModel):
     assembled_text: str
     job_ad_text: str
+    language: str = "en"
 
 
 @router.post("/preview-check")
@@ -841,7 +1021,7 @@ async def preview_check(body: PreviewCheckRequest):
     """Run guard rules 5-9 on hand-edited letter text. Returns pass/fail + issues."""
     factbank = load_factbank()
     validation = validate_assembled_text(
-        body.assembled_text, body.job_ad_text, factbank,
+        body.assembled_text, body.job_ad_text, factbank, language=body.language,
     )
     return {
         "passed": validation.passed,
@@ -1009,6 +1189,91 @@ async def optimize_cv(body: OptimizeCvRequest):
     }
 
 
+# ── Translate assembled letter body ──────────────────────────────────────────
+
+TRANSLATE_SYSTEM_PROMPT = (
+    "You are a professional translator. Translate the following cover letter body "
+    "to {target_language}.\n\n"
+    "RULES:\n"
+    "1. Preserve ALL numbers, percentages, dates, and proper nouns exactly as written.\n"
+    "2. Preserve ALL LaTeX commands and formatting — never translate inside \\textbf{{}}, "
+    "\\emph{{}}, \\href{{}}, or any curly-brace argument.\n"
+    "3. Do not add any new claims, certifications, or qualifications.\n"
+    "4. Output only the translated text — no preamble, no explanations."
+)
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    language: str
+    provider: str | None = None
+    model: str | None = None
+    job_ad_text: str = ""
+
+
+@router.post("/translate")
+async def translate_text(body: TranslateRequest):
+    """Translate the assembled letter body to a target language."""
+    lang = get_language(body.language)
+    if lang is None:
+        codes = ", ".join(l.code for l in _LANGUAGES)
+        raise HTTPException(400, f"Unsupported language '{body.language}'. Supported: {codes}")
+    if body.language == "en":
+        return {"translated": body.text, "language": "en", "passed": True, "errors": [], "warnings": []}
+
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "No text provided to translate")
+
+    facts = load_facts()
+    factbank = load_factbank()
+
+    llm = get_provider(body.provider, body.model)
+    target_name = lang.english_name
+    system = TRANSLATE_SYSTEM_PROMPT.replace("{target_language}", target_name)
+
+    full = ""
+    try:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": text},
+        ]
+        async for token in llm.chat(messages, stream=True):
+            full += token
+    except Exception as e:
+        raise HTTPException(502, f"Translation provider error: {e}")
+    finally:
+        try:
+            await llm.close()
+        except Exception:
+            pass
+
+    translated = full.strip()
+
+    # Verify preservation: numbers, entities, banned claims, certifications
+    from app.translate import check_translation
+    check = check_translation(text, translated, factbank)
+    # Run rules 5 and 9 on the translated output
+    from app.guard.validator import validate_write_gate
+    gate = validate_write_gate(translated, factbank, body.language)
+
+    all_errors = check.get("errors", []) + [
+        {"rule": e.rule, "message": e.message, "detail": e.detail}
+        for e in gate.errors
+    ]
+
+    return {
+        "translated": translated,
+        "language": body.language,
+        "passed": len(all_errors) == 0,
+        "errors": all_errors,
+        "warnings": check.get("warnings", []) + [
+            {"rule": w.rule, "message": w.message, "detail": w.detail}
+            for w in gate.warnings
+        ],
+    }
+
+
 # ── Phase 4: AI template mapping ──────────────────────────────────────────────
 
 MAP_TEMPLATE_PROMPT = """
@@ -1077,6 +1342,16 @@ async def map_template(body: MapTemplateRequest):
     template_name = body.template_name.strip().lower().replace(" ", "-")[:40]
     if not template_name:
         raise HTTPException(400, "Template name is required")
+    # Reject path-traversal and known shipped templates
+    if "/" in template_name or "\\" in template_name or template_name.startswith("."):
+        raise HTTPException(400, f"Invalid template name: '{template_name}'")
+    shipped = {t["id"]: t for t in list_templates()}
+    if template_name in shipped:
+        raise HTTPException(
+            400,
+            f"'{template_name}' already exists. Choose a different name — "
+            f"shipped templates cannot be overwritten.",
+        )
 
     facts = load_facts()
     if not facts:

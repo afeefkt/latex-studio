@@ -78,11 +78,20 @@ const btnApplySettings = $("btn-apply-settings");
 const applySettingsPanel = $("apply-settings-panel");
 const applyStatus    = $("apply-status");
 const fitReport      = $("fit-report");
-const generateStatus = $("generate-status");
-const applyDownloads = $("apply-downloads");
 const applyStep2     = $("apply-step-2");
 const applyStep3     = $("apply-step-3");
 const applyStep4     = $("apply-step-4");
+const generateStatus = $("generate-status");
+const applyDownloads = $("apply-downloads");
+const btnGenerate    = $("btn-generate");
+const optCvTemplate  = $("opt-cv-template");
+const optLetterTemplate = $("opt-letter-template");
+const optLanguage    = $("opt-language");
+const docLetter      = $("doc-letter");
+const docCv          = $("doc-cv");
+const translateRow   = $("translate-row");
+const btnTranslate   = $("btn-translate");
+const translateStatus = $("translate-status");
 
 let chatHistory = [];
 let isStreaming = false;
@@ -161,35 +170,113 @@ async function loadDocList() {
   }
 }
 
-function renderDocList(docs) {
-  let html = docs.map(d => {
-    const icon = d.kind === "letter" ? "✉️" : "📄";
-    const active = currentDoc && currentDoc.path === d.path ? " active" : "";
-    const path = escapeHTML(d.path);
-    const name = escapeHTML(d.name);
-    // The base CV is where the designed templates get their class file and photo.
-    // The server refuses to delete it, so don't offer a button that cannot work.
-    const del = d.path === "cv" ? "" :
-      `<button class="doc-delete" data-del="${path}" title="Delete ${name}" aria-label="Delete ${name}">×</button>`;
-    return `<div class="doc-item${active}" data-path="${path}" data-kind="${d.kind}">
-      <span class="doc-icon">${icon}</span>
-      <span class="doc-name">${name}</span>
-      ${del}
+async function loadTemplateList() {
+  try {
+    const data = await fetchJSON("/api/templates");
+    renderTemplateList(data.templates);
+  } catch (_) {}
+}
+
+function renderTemplateList(templates) {
+  if (!templates || !templates.length) {
+    $("template-list").innerHTML = '<div class="sidebar-empty">No templates loaded</div>';
+    return;
+  }
+  // Count only those with has_template
+  const available = templates.filter(t => t.has_template);
+  const countEl = $("template-list-count");
+  if (countEl) countEl.textContent = available.length;
+
+  let html = "";
+  for (const t of templates) {
+    if (!t.has_template) continue;
+    const icon = t.icon || "📄";
+    const colour = t.colour || "var(--accent)";
+    const kind = t.kind || "cv";
+    html += `<div class="template-item" data-tpl-id="${escapeHTML(t.id)}" data-tpl-kind="${kind}">
+      <span class="template-icon" style="color:${colour}">${escapeHTML(icon)}</span>
+      <span class="template-name">${escapeHTML(t.name)}</span>
     </div>`;
-  }).join("");
+  }
+  $("template-list").innerHTML = html || '<div class="sidebar-empty">No templates</div>';
+
+  // Click to create document from template
+  $("template-list").querySelectorAll(".template-item").forEach(el => {
+    el.addEventListener("click", () => {
+      newFromTemplate(el.dataset.tplId, el.dataset.tplKind);
+    });
+  });
+}
+
+async function newFromTemplate(tplId, kind) {
+  const base = kind === "letter" ? "new-letter" : "new-cv";
+  const name = prompt(`Name for this ${kind === "letter" ? "letter" : "CV"}? (e.g. my-app)`, base);
+  if (!name || !name.trim()) return;
+
+  try {
+    const resp = await fetch(`/api/templates/${tplId}/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), template_id: tplId }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+    const data = await resp.json();
+    await loadDocList();
+    await switchDocument(data.document.path, data.document.kind);
+  } catch (e) {
+    alert(`Failed to create: ${e.message}`);
+  }
+}
+
+function renderDocList(docs) {
+  if (!docs || !docs.length) {
+    docList.innerHTML = '<div class="sidebar-empty">No documents yet.</div>';
+    return;
+  }
+
+  const manualCVs = docs.filter(d => d.kind === "cv" && !d.generated);
+  const generatedCVs = docs.filter(d => d.kind === "cv" && d.generated);
+  const letters = docs.filter(d => d.kind === "letter");
+
+  const _icon = d => d.kind === "letter" ? "✉️" : "📄";
+  const _del = d => d.path === "cv" ? "" :
+    `<button class="doc-delete" data-del="${escapeHTML(d.path)}" title="Delete ${escapeHTML(d.name)}">×</button>`;
+
+  const _row = d => {
+    const active = currentDoc && currentDoc.path === d.path ? " active" : "";
+    const meta = d.company ? ` · ${escapeHTML(d.company)}` : "";
+    let langBadge = "";
+    if (d.language && d.language !== "en") {
+      langBadge = `<span class="doc-lang">${escapeHTML(d.language.toUpperCase())}</span>`;
+    }
+    return `<div class="doc-item${active}" data-path="${escapeHTML(d.path)}" data-kind="${d.kind}">
+      <span class="doc-icon">${_icon(d)}</span>
+      <span class="doc-name">${escapeHTML(d.name)}${meta}</span>
+      ${langBadge}
+      ${_del(d)}
+    </div>`;
+  };
+
+  const _section = (title, items) => {
+    if (!items.length) return "";
+    return `<div class="doc-section">
+      <div class="doc-section-header">${title} <span class="doc-section-count">${items.length}</span></div>
+      ${items.map(_row).join("")}
+    </div>`;
+  };
+
+  let html = _section("📂 Manual CVs", manualCVs) +
+             _section("🤖 Generated CVs", generatedCVs) +
+             _section("✉️ Cover Letters", letters);
 
   // Add Fact Bank entry
   const factsActive = currentDoc && currentDoc.path === "facts" ? " active" : "";
-  html += `<div class="doc-item${factsActive}" data-path="facts" data-kind="facts" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+  html += `<div class="doc-item doc-item-facts${factsActive}" data-path="facts" data-kind="facts">
     <span class="doc-icon">📋</span>
     <span class="doc-name">Fact Bank</span>
   </div>`;
 
-  if (!docs.length) {
-    docList.innerHTML = html || '<div class="sidebar-empty">No documents yet. Click <strong>+ New</strong> to create one.</div>';
-  } else {
-    docList.innerHTML = html;
-  }
+  docList.innerHTML = html;
 
   // Click handlers
   docList.querySelectorAll(".doc-item").forEach(el => {
@@ -198,7 +285,6 @@ function renderDocList(docs) {
 
   docList.querySelectorAll(".doc-delete").forEach(btn => {
     btn.addEventListener("click", (e) => {
-      // Without this the row's own handler also fires and opens what we deleted.
       e.stopPropagation();
       deleteDocument(btn.dataset.del, btn);
     });
@@ -1015,6 +1101,24 @@ function showView(which) {
 btnViewApply.addEventListener("click", () => showView("apply"));
 btnViewEdit.addEventListener("click", () => showView("edit"));
 
+// ── Generic fetch + select helpers ──────────────────────────────────────────
+async function fetchJSON(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+function populateSelect($select, items, valueFn, labelFn, placeholder = null) {
+  const val = $select.value;
+  $select.innerHTML = placeholder ? `<option value="">${escapeHTML(placeholder)}</option>` : "";
+  for (const item of items) {
+    const v = valueFn(item);
+    const l = labelFn(item);
+    $select.innerHTML += `<option value="${escapeHTML(v)}">${escapeHTML(l)}</option>`;
+  }
+  // Restore selection if still valid
+  if (val && [...$select.options].some(o => o.value === val)) $select.value = val;
+}
+
 applyProvider.addEventListener("change", loadApplyModels);
 
 async function loadApplyModels() {
@@ -1029,6 +1133,45 @@ async function loadApplyModels() {
 }
 loadApplyModels();
 
+async function loadTemplates() {
+  try {
+    const data = await fetchJSON("/api/templates");
+    const cvs = (data.templates || []).filter(t => t.kind === "cv" && t.has_template);
+    const letters = (data.templates || []).filter(t => t.kind === "letter" && t.has_template);
+    populateSelect(optCvTemplate, cvs, t => t.id, t => t.name);
+    if (letters.length > 0) {
+      populateSelect(optLetterTemplate, letters, t => t.id, t => t.name);
+      if (letters.length > 1) {
+        const row = $("opt-letter-template-row");
+        if (row) row.classList.remove("hidden");
+      }
+    }
+  } catch (_) {}
+}
+async function loadLanguages() {
+  try {
+    const data = await fetchJSON("/api/i18n/languages");
+    populateSelect(optLanguage, data.languages || [], l => l.code, l => `${l.native_name} (${l.english_name})`);
+  } catch (_) {}
+}
+loadTemplates();
+loadLanguages();
+
+// Show/hide translate button when language changes
+optLanguage.addEventListener("change", () => {
+  if (optLanguage.value !== "en") {
+    translateRow.classList.remove("hidden");
+    // Clear prior translation when language changes
+    if (tailorResultData) {
+      tailorResultData = { ...tailorResultData, _translated_body: null };
+      translateStatus.textContent = "";
+    }
+  } else {
+    translateRow.classList.add("hidden");
+    translateStatus.textContent = "";
+  }
+});
+
 btnApplyReset.addEventListener("click", resetApplyFlow);
 btnApplySettings.addEventListener("click", () => applySettingsPanel.classList.toggle("hidden"));
 
@@ -1039,6 +1182,9 @@ function resetApplyFlow() {
   fitReport.innerHTML = "";
   generateStatus.innerHTML = "";
   applyDownloads.innerHTML = "";
+  translateStatus.textContent = "";
+  translateRow.classList.add("hidden");
+  optLanguage.value = "en";
   [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
   jdTextarea.focus();
 }
@@ -1269,41 +1415,41 @@ function renderFitReport(d) {
 
 // ── Apply view: generate the documents ────────────────────────────────────────
 
-// Channel button clicks fire generateDocs with the selected template
-$("btn-channel-portal").addEventListener("click", (e) => {
-  if (e.target.tagName === "SELECT") return; // let the select do its thing
-  generateDocs("portal");
-});
-$("btn-channel-email").addEventListener("click", (e) => {
-  if (e.target.tagName === "SELECT") return;
-  generateDocs("email");
-});
+// Single Generate button reads all form controls
+btnGenerate.addEventListener("click", () => generateDocs());
 
-// Stop select clicks from bubbling to the channel button
-document.querySelectorAll(".channel-template").forEach(sel => {
-  sel.addEventListener("click", (e) => e.stopPropagation());
-});
-
-async function generateDocs(channel) {
+async function generateDocs() {
   if (!tailorResultData) return;
-  const buttons = document.querySelectorAll(".channel-btn");
-  buttons.forEach(b => b.disabled = true);
-  generateStatus.innerHTML = '<span class="spinner"></span> Building your CV and cover letter, then compiling both…';
+  btnGenerate.disabled = true;
+  btnGenerate.textContent = "Generating…";
+  generateStatus.innerHTML = '<span class="spinner"></span> Building documents, then compiling…';
   applyStep4.classList.add("hidden");
 
   const d = tailorResultData;
-  // Read the template selection for this channel
-  const templateSelect = channel === "portal"
-    ? $("portal-template-select")
-    : $("email-template-select");
-  const cvTemplate = templateSelect ? templateSelect.value : (channel === "portal" ? "ats-cv" : "optimized-cv");
+  const channel = document.querySelector('input[name="channel"]:checked')?.value || "portal";
+  const wantLetter = docLetter.checked;
+  const wantCv = docCv.checked;
+  const documents = [];
+  if (wantLetter) documents.push("letter");
+  if (wantCv) documents.push("cv");
+
+  if (documents.length === 0) {
+    generateStatus.innerHTML = '<span class="apply-err">Select at least one document to generate.</span>';
+    btnGenerate.disabled = false;
+    btnGenerate.textContent = "Generate";
+    return;
+  }
+
   try {
     const resp = await fetch("/api/content/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         channel,
-        cv_template: cvTemplate,
+        documents,
+        language: optLanguage.value,
+        cv_template: optCvTemplate.value || "",
+        letter_template: optLetterTemplate.value || "",
         company_name: d.company_name || "",
         role_title: d.role_title || "",
         location: d.location || "",
@@ -1314,8 +1460,7 @@ async function generateDocs(channel) {
         unmatched: d.unmatched || [],
         matched_count: (d.matched || []).length,
         notes: d.notes || "",
-        edited_body: d.edited_body || null,
-        // Both feed CV skill ranking — without them the sidebar is untailored
+        edited_body: d._translated_body || d.edited_body || null,
         job_ad_text: $("jd-textarea").value || "",
         matched_phrases: (d.matched || []).map(m => m.jd_phrase || "").filter(Boolean),
       }),
@@ -1334,12 +1479,14 @@ async function generateDocs(channel) {
   } catch (e) {
     generateStatus.innerHTML = `<span class="apply-err">${e.message || "Generation failed"}</span>`;
   } finally {
-    buttons.forEach(b => b.disabled = false);
+    btnGenerate.disabled = false;
+    btnGenerate.textContent = "Generate";
   }
 }
 
 function renderDownloads(out) {
   const row = (item, label) => {
+    if (!item) return "";
     const ok = item.success;
     const status = ok
       ? '<span class="dl-meta">compiled ✓</span>'
@@ -1355,11 +1502,17 @@ function renderDownloads(out) {
     </div>`;
   };
 
-  applyDownloads.innerHTML =
-    row(out.cv, "📄 CV") +
-    row(out.letter, "✉️ Letter") +
-    `<div class="fit-notes">Logged to Applications (📊 in the top bar). ` +
-    `CV variant: <b>${escapeHTML(out.cv_variant)}</b>.</div>`;
+  const items = (out.documents || ["letter", "cv"])
+    .map(k => ({ key: k, label: k === "letter" ? "✉️ Letter" : "📄 CV", item: out[k] }))
+    .filter(x => x.item)
+    .map(x => row(x.item, x.label))
+    .join("");
+
+  applyDownloads.innerHTML = items +
+    (out.language && out.language !== "en"
+      ? `<div class="fit-notes">Generated in <b>${escapeHTML(out.language)}</b>.</div>`
+      : `<div class="fit-notes">Logged to Applications (📊 in the top bar). ` +
+        `CV variant: <b>${escapeHTML(out.cv_variant)}</b>.</div>`);
 
   applyDownloads.querySelectorAll(".dl-open").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -1370,6 +1523,61 @@ function renderDownloads(out) {
     });
   });
 }
+
+// ── Translate button ─────────────────────────────────────────────────────────
+btnTranslate.addEventListener("click", async () => {
+  if (!tailorResultData) return;
+  const text = tailorResultData.assembled_body;
+  if (!text) {
+    translateStatus.innerHTML = '<span class="apply-err">No letter body to translate. Run the analysis first.</span>';
+    return;
+  }
+  const lang = optLanguage.value;
+  if (!lang || lang === "en") return;
+
+  btnTranslate.disabled = true;
+  btnTranslate.textContent = "Translating…";
+  translateStatus.innerHTML = '<span class="spinner"></span> Translating…';
+
+  try {
+    const resp = await fetch("/api/content/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        language: lang,
+        provider: applyProvider.value || null,
+        model: applyModel.value || null,
+        job_ad_text: jdTextarea.value || "",
+      }),
+    });
+    if (!resp.ok) {
+      const msg = await resp.text();
+      throw new Error(msg || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    if (data.errors && data.errors.length) {
+      translateStatus.innerHTML = `<span class="apply-err">Translation blocked: ${data.errors.map(e => e.message).join("; ")}</span>`;
+      if (data.translated) {
+        // Offer hand-fix: store translated text but show warnings
+        tailorResultData = { ...tailorResultData, _translated_body: data.translated };
+        translateStatus.innerHTML += `<br><small>Translated text stored for hand-editing. Re-check required.</small>`;
+      }
+      return;
+    }
+    if (data.warnings && data.warnings.length) {
+      translateStatus.innerHTML = `<span class="apply-warn">Warnings: ${data.warnings.map(w => w.message).join("; ")}</span>`;
+    } else {
+      translateStatus.innerHTML = '<span class="apply-ok">✓ Translated</span>';
+    }
+    tailorResultData = { ...tailorResultData, _translated_body: data.translated };
+  } catch (e) {
+    translateStatus.innerHTML = `<span class="apply-err">${e.message || "Translation failed"}</span>`;
+  } finally {
+    btnTranslate.disabled = false;
+    btnTranslate.textContent = "Translate";
+  }
+});
 
 // ── Chat: Send message ─────────────────────────────────────────────────────────
 
@@ -1687,6 +1895,7 @@ btnNewProfile.addEventListener("click", async () => {
 (async function init() {
   await loadProfiles();
   await loadDocList();
+  loadTemplateList();
   try {
     const resp = await fetch("/api/docs");
     const data = await resp.json();

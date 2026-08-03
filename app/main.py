@@ -123,6 +123,16 @@ async def get_templates():
     return {"templates": list_templates()}
 
 
+# ── i18n ──────────────────────────────────────────────────────────────────────
+
+from app.i18n import SUPPORTED as _LANGUAGES, to_dict as _lang_to_dict
+
+
+@app.get("/api/i18n/languages")
+async def get_languages():
+    return {"languages": [_lang_to_dict(l) for l in _LANGUAGES]}
+
+
 class CreateBody(BaseModel):
     name: str
     template_id: str

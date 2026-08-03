@@ -2,6 +2,17 @@
 # Copy this to hooks.yaml and rewrite the prose in your own voice.
 # Available slots: {company_name}  {role_title}  {focus_phrase}
 # Keep each hook to 1-2 sentences — it is the first thing the reader sees.
+#
+# The flat form (keys at the top level) is accepted forever.
+# Per-language hooks go under a language code key:
+#
+#   en:
+#     exact_match: ...
+#   de:
+#     exact_match: ...
+#
+# The system picks the matching language block; falling back to the flat key
+# when no language-specific hook is written.
 
 exact_match: >-
   Your posting for the {role_title} role asks for {focus_phrase}. That has been the

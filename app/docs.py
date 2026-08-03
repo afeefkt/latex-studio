@@ -4,6 +4,8 @@ import json
 import os
 import shutil
 import stat
+from datetime import datetime
+from datetime import timezone as _dt_timezone
 from pathlib import Path
 
 import jinja2
@@ -327,22 +329,44 @@ def _load_template_data(template_id: str) -> dict:
     return {}
 
 # ── Low-level file ops ────────────────────────────────────────────────────────
+# ── Path safety ────────────────────────────────────────────────────────────────
+
+def _safe_target(doc_path: str) -> Path:
+    """Validate that doc_path resolves inside the workspace.
+
+    Normalises separators, strips leading/trailing slashes, resolves symlinks,
+    and confirms the result is under WORKSPACE.  Returns the resolved Path.
+
+    Raises PermissionError with a plain message if the path escapes.
+    """
+    clean = (doc_path or "").strip().replace("\\", "/").strip("/")
+    if not clean:
+        raise FileNotFoundError("No document specified")
+    root = WORKSPACE.resolve()
+    target = (WORKSPACE / clean).resolve()
+    if target == root or not target.is_relative_to(root):
+        raise PermissionError(f"Refusing to access outside the workspace: '{doc_path}'")
+    return target
+
 
 def read_file(doc_path: str, filename: str = "main.tex") -> str:
-    path = WORKSPACE / doc_path / filename
+    target = _safe_target(doc_path)
+    path = target / filename
     if not path.exists():
         raise FileNotFoundError(f"{path} not found")
     return path.read_text(encoding="utf-8")
 
 
 def write_file(doc_path: str, content: str, filename: str = "main.tex") -> None:
-    path = WORKSPACE / doc_path / filename
+    target = _safe_target(doc_path)
+    path = target / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
 def pdf_path(doc_path: str) -> Path:
-    return WORKSPACE / doc_path / "out.pdf"
+    target = _safe_target(doc_path)
+    return target / "out.pdf"
 
 
 # ── Workspace init ────────────────────────────────────────────────────────────
@@ -364,15 +388,38 @@ def init_workspace() -> None:
         if src.exists() and not dst.exists():
             shutil.copy2(src, dst)
 
+    # First-run: seed i18n directory
+    i18n_dir = PATHS_WORKSPACE / "i18n"
+    if not i18n_dir.exists():
+        src_i18n = TEMPLATES_SRC.parent / "i18n" if TEMPLATES_SRC.exists() else None
+        if src_i18n and src_i18n.exists():
+            shutil.copytree(src_i18n, i18n_dir)
+        else:
+            i18n_dir.mkdir(parents=True, exist_ok=True)
+
     _ensure_default_profile()
 
 
 # ── Document listing ──────────────────────────────────────────────────────────
 
+def _read_manifest(doc_dir: Path) -> dict | None:
+    """Read the Phase 1 provenance manifest if it exists."""
+    mf = doc_dir / "document.json"
+    if not mf.exists():
+        return None
+    try:
+        return json.loads(mf.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def list_documents() -> list[dict]:
     """
     Return all user-editable documents in the workspace (cv/, letters/<name>/ etc.).
     Excludes .build, templates, hidden folders, and the letters container itself.
+
+    Phase 2: reads document.json manifests. Legacy folders without a manifest
+    fall back to the folder-name heuristic for `generated` and `kind`.
     """
     if not WORKSPACE.exists():
         return []
@@ -388,22 +435,60 @@ def list_documents() -> list[dict]:
                 for sub in sorted(entry.iterdir()):
                     if sub.is_dir() and not sub.name.startswith("."):
                         sub_main = sub / "main.tex"
-                        docs.append({
-                            "path": f"letters/{sub.name}",
-                            "name": sub.name.replace("_", " ").title(),
-                            "kind": "letter",
-                            "has_tex": sub_main.exists(),
-                        })
+                        manifest = _read_manifest(sub)
+                        docs.append(_doc_entry(
+                            path=f"letters/{sub.name}",
+                            name=sub.name.replace("_", " ").title(),
+                            kind="letter",
+                            has_tex=sub_main.exists(),
+                            manifest=manifest,
+                        ))
             continue
         main_tex = entry / "main.tex"
-        kind = "letter" if name.startswith("letter") else "cv"
-        docs.append({
-            "path": name,
-            "name": name.replace("_", " ").title(),
-            "kind": kind,
-            "has_tex": main_tex.exists(),
-        })
+        manifest = _read_manifest(entry)
+        docs.append(_doc_entry(
+            path=name,
+            name=name.replace("_", " ").title(),
+            kind="cv",
+            has_tex=main_tex.exists(),
+            manifest=manifest,
+        ))
     return docs
+
+
+def _doc_entry(path: str, name: str, kind: str, has_tex: bool,
+               manifest: dict | None = None) -> dict:
+    """Build a document entry dict, enriching from manifest when available."""
+    if manifest and manifest.get("schema") == 1:
+        generated = manifest.get("origin") == "apply"
+        mf_kind = manifest.get("kind", kind)
+        return {
+            "path": path,
+            "name": name,
+            "kind": mf_kind,
+            "has_tex": has_tex,
+            "generated": generated,
+            "origin": manifest.get("origin", ""),
+            "template_id": manifest.get("template_id", ""),
+            "language": manifest.get("language", ""),
+            "company": manifest.get("company", ""),
+            "role": manifest.get("role", ""),
+        }
+    # Legacy folder — guess from folder name
+    generated = path.startswith("tailored_") or path.startswith("cv_")
+    mf_kind = "letter" if name.startswith("letter") else "cv"
+    return {
+        "path": path,
+        "name": name,
+        "kind": mf_kind,
+        "has_tex": has_tex,
+        "generated": generated,
+        "origin": "",
+        "template_id": "",
+        "language": "",
+        "company": "",
+        "role": "",
+    }
 
 
 # ── Template listing ──────────────────────────────────────────────────────────
@@ -432,7 +517,7 @@ def list_templates() -> list[dict]:
 # What a document actually needs to compile: the class/package files and images.
 # The source folder also accumulates build output and unrelated documents — a
 # previous CV PDF was being duplicated into every generated application folder.
-_ASSET_SKIP_NAMES = {".build", "out.pdf", "__pycache__", ".gitignore", ".git"}
+_ASSET_SKIP_NAMES = {".build", "out.pdf", "__pycache__", ".gitignore", ".git", "document.json"}
 _ASSET_SKIP_SUFFIXES = {
     ".pdf", ".aux", ".log", ".out", ".fls", ".fdb_latexmk", ".synctex", ".gz",
 }
@@ -447,11 +532,16 @@ def _ignore_assets(_dir: str, names: list[str]) -> set[str]:
     return {n for n in names if _skip_asset(n)}
 
 
-def create_document(name: str, template_id: str, variables: dict | None = None) -> dict:
+def create_document(name: str, template_id: str, variables: dict | None = None,
+                    origin: str = "manual", language: str = "en",
+                    company: str = "", role: str = "", channel: str = "") -> dict:
     """
     Create a new document folder from a template.
     For CV templates, facts.yaml is auto-loaded as 'facts' if not provided.
     Returns the document info dict.
+
+    Writes a document.json manifest so Phase 2 can distinguish manual vs generated
+    documents without relying on folder-name heuristics.
     """
     variables = variables or {}
     tpl_dir = TEMPLATES / template_id
@@ -520,6 +610,25 @@ def create_document(name: str, template_id: str, variables: dict | None = None) 
             else:
                 shutil.copy2(item, dest)
 
+    # Write provenance manifest — the only place document metadata is known with
+    # certainty. Stored as a file in the document folder itself so it survives
+    # moves, renames, and profile switches.
+    manifest = {
+        "schema": 1,
+        "created_utc": datetime.now(_dt_timezone.utc).isoformat().replace("+00:00", "Z"),
+        "origin": origin,
+        "kind": kind,
+        "template_id": template_id,
+        "language": language,
+        "translated": False,
+        "company": company,
+        "role": role,
+        "channel": channel,
+    }
+    (target_dir / "document.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8",
+    )
+
     return {
         "path": str(target_dir.relative_to(WORKSPACE)).replace("\\", "/"),
         "name": name.replace("_", " ").title(),
@@ -563,13 +672,7 @@ def delete_document(doc_path: str) -> None:
             "and profile photo from. Deleting it would silently break future CVs."
         )
 
-    root = WORKSPACE.resolve()
-    target = (WORKSPACE / clean).resolve()
-    # Deletion is destructive and the path arrives from a URL, so confirm it
-    # actually lands inside the workspace before removing anything.
-    if target == root or not target.is_relative_to(root):
-        raise PermissionError(f"Refusing to delete outside the workspace: '{doc_path}'")
-
+    target = _safe_target(doc_path)
     if not target.exists():
         raise FileNotFoundError(f"Document '{doc_path}' not found")
 
@@ -593,14 +696,14 @@ def delete_document(doc_path: str) -> None:
 # ── Document file listing ─────────────────────────────────────────────────────
 
 def list_doc_files(doc_path: str) -> list[str]:
-    """List editable files in a document folder (tex, sty, cls, yaml, json)."""
-    target = WORKSPACE / doc_path
+    """List editable files in a document folder (tex, sty, cls, yaml). Excludes document.json."""
+    target = _safe_target(doc_path)
     if not target.exists():
         return []
-    editable_exts = {".tex", ".sty", ".cls", ".yaml", ".json"}
+    editable_exts = {".tex", ".sty", ".cls", ".yaml"}
     files = []
     for item in sorted(target.iterdir()):
-        if item.is_file() and item.suffix in editable_exts:
+        if item.is_file() and item.suffix in editable_exts and item.name != "document.json":
             files.append(item.name)
     return files
 
