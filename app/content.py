@@ -144,7 +144,10 @@ def _letter_vars(
         "role_title": role,
         "focus_phrase": focus_phrase,
         "hook_key": hook_key,
-        "hook_text": _build_hook_text(hook_key, company, role, focus_phrase, language),
+        # When a non-English edited_body is supplied the hook was included in the
+        # translation and must not be rendered again as a separate paragraph.
+        "hook_text": "" if (edited_body and language != "en")
+                     else _build_hook_text(hook_key, company, role, focus_phrase, language),
         "about_company": f"at {company}",
         "babel_lang": babel_lang,
         "language": language,
@@ -168,6 +171,8 @@ def _cv_vars(facts: dict, bullet_ids: list[str], optimized_map: dict,
         matched_phrases=matched_phrases,
     )
     labels = _load_labels()
+    lang_info = get_language(language)
+    babel_lang = lang_info.babel if lang_info else "english"
     return {
         "facts": facts,
         "role_groups": role_groups,
@@ -175,6 +180,7 @@ def _cv_vars(facts: dict, bullet_ids: list[str], optimized_map: dict,
         "other_skills": other_skills,
         "language_rows": _language_rows(facts),
         "language": language,
+        "babel_lang": babel_lang,
         "L": labels,
     }
 
@@ -465,6 +471,7 @@ async def tailor_letter(body: TailorRequest):
                 'role_title': role_title,
                 'letter_preview': letter_tex[:500],
                 'assembled_body': assembled_body,
+                'hook_text': template_vars.get('hook_text', ''),
                 'focus_phrase': focus_phrase,
                 'hook_key': hook_key,
                 'selected_bullet_ids': tailor_data.get('selected_bullet_ids', []),
@@ -517,6 +524,9 @@ class GenerateRequest(BaseModel):
     edited_body: str | None = None
     job_ad_text: str = ""
     matched_phrases: list[str] = []
+    # {key: translated_text} from /translate-cv. Already guard-checked there;
+    # substituted verbatim so /generate keeps no model in the loop.
+    translated_cv: dict[str, str] = {}
 
 
 def _slugify(text: str, fallback: str) -> str:
@@ -631,6 +641,9 @@ async def generate_documents(body: GenerateRequest):
             matched_phrases=body.matched_phrases,
             language=language,
         )
+        if body.translated_cv:
+            from app.cv_translate import apply_cv_strings
+            cv_vars = apply_cv_strings(cv_vars, body.translated_cv)
         specs.append(("cv", ct, f"cv_{slug}", cv_vars))
 
     # ── Create + compile each document ──
@@ -1271,6 +1284,206 @@ async def translate_text(body: TranslateRequest):
             {"rule": w.rule, "message": w.message, "detail": w.detail}
             for w in gate.warnings
         ],
+    }
+
+
+# ── Translate CV content ─────────────────────────────────────────────────────
+#
+# The letter round-trips as prose; a CV cannot. It is a structure of short
+# strings, and translating it as one blob would lose which bullet belongs to
+# which role. So it goes over as a flat {key: text} JSON map and comes back the
+# same shape — see app/cv_translate.py for the key scheme.
+#
+# This endpoint holds the model. /generate stays model-free: it receives the
+# finished map and only substitutes, which keeps "the only place documents are
+# written has no LLM in the loop" true.
+
+CV_TRANSLATE_SYSTEM_PROMPT = (
+    "You are a professional CV translator. You receive a JSON object mapping opaque keys "
+    "to short English CV strings. Translate ONLY the values into {target_language} and "
+    "return a JSON object with EXACTLY the same keys.\n\n"
+    "RULES:\n"
+    "1. Return ONLY valid JSON. No markdown fence, no commentary, no preamble.\n"
+    "2. Keep every key byte-for-byte as given. Never add, drop, merge, or reorder keys.\n"
+    "3. NEVER translate proper nouns. Copy them through verbatim: employer and company "
+    "names, university names, city and country names, people's names, product and tool "
+    "names, programming languages, and technical standards with their identifiers "
+    "(for example AUTOSAR, ISO 26262, ASIL-B, MISRA C, MATLAB/Simulink, CANoe, DOORS, "
+    "Embedded Coder, XCP, Python, C/C++).\n"
+    "4. Preserve ALL numbers, percentages, and dates exactly. Never convert, recompute, "
+    "or re-order them. '8+ years' keeps the 8.\n"
+    "5. Do NOT add, strengthen, or invent any claim, certification, qualification, or "
+    "seniority. Translate hedges AS hedges — 'familiar with the objectives of X' must "
+    "never become 'certified in X'.\n"
+    "6. Write natural, idiomatic professional {target_language} as it appears on a real "
+    "CV in that language — not literal word-for-word translation.\n"
+    "7. Keep each value roughly its original length. These are CV bullets and headings.\n"
+    "8. Output plain text values only. Never emit LaTeX commands or backslashes.\n"
+    "9. This is an ENGINEERING CV. Read every ambiguous English term in its "
+    "engineering sense, never its everyday sense. In control engineering a 'plant' "
+    "or 'plant model' is the controlled system (German: Regelstrecke / "
+    "Streckenmodell) — never a factory and never a botanical plant. A 'bus' is a "
+    "data bus, a 'harness' is a wiring harness, 'commissioning' is Inbetriebnahme. "
+    "When a term is standard jargon in the target language's engineering industry, "
+    "use that jargon."
+)
+
+
+class TranslateCvRequest(BaseModel):
+    language: str
+    selected_bullet_ids: list[str] = []
+    optimized_bullets: list[dict] = []
+    job_ad_text: str = ""
+    matched_phrases: list[str] = []
+    provider: str | None = None
+    model: str | None = None
+
+
+def _parse_json_object(raw: str) -> dict:
+    """Pull a JSON object out of a model response, fenced or bare."""
+    text = raw.strip()
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fenced:
+        text = fenced.group(1).strip()
+    else:
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start:end + 1]
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("expected a JSON object")
+    return parsed
+
+
+@router.post("/translate-cv")
+async def translate_cv(body: TranslateCvRequest):
+    """Translate every editable CV string into the target language."""
+    lang = get_language(body.language)
+    if lang is None:
+        codes = ", ".join(l.code for l in _LANGUAGES)
+        raise HTTPException(400, f"Unsupported language '{body.language}'. Supported: {codes}")
+    if body.language == "en":
+        return {"translated": {}, "language": "en", "passed": True, "errors": [], "warnings": []}
+
+    facts = load_facts()
+    if not facts:
+        raise HTTPException(400, "facts.yaml not found or empty")
+
+    optimized_map = {
+        o["id"]: o["text"] for o in body.optimized_bullets if "id" in o and "text" in o
+    }
+    cv_vars = _cv_vars(
+        facts=facts, bullet_ids=body.selected_bullet_ids,
+        optimized_map=optimized_map,
+        job_ad_text=body.job_ad_text,
+        matched_phrases=body.matched_phrases,
+        language=body.language,
+    )
+
+    from app.cv_translate import collect_cv_strings
+    source = collect_cv_strings(cv_vars)
+    if not source:
+        return {"translated": {}, "language": body.language, "passed": True,
+                "errors": [], "warnings": []}
+
+    factbank = load_factbank()
+
+    # The fact bank already knows every proper noun that must survive. Handing
+    # the model that exact list beats hoping rule 3's examples generalise.
+    keep = sorted(
+        {e for e in (factbank.all_entities | factbank.all_skills) if len(e) > 2},
+        key=str.lower,
+    )[:120]
+
+    system = CV_TRANSLATE_SYSTEM_PROMPT.replace("{target_language}", lang.english_name)
+    if keep:
+        system += (
+            "\n\nDO NOT TRANSLATE these exact terms — reproduce them character for "
+            "character wherever they appear:\n" + ", ".join(keep)
+        )
+
+    llm = get_provider(body.provider, body.model)
+    full = ""
+    try:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(source, ensure_ascii=False, indent=2)},
+        ]
+        async for token in llm.chat(messages, stream=True):
+            full += token
+    except Exception as e:
+        raise HTTPException(502, f"Translation provider error: {e}")
+    finally:
+        try:
+            await llm.close()
+        except Exception:
+            pass
+
+    try:
+        parsed = _parse_json_object(full)
+    except Exception as e:
+        raise HTTPException(502, f"Translator returned unparseable JSON: {e}")
+
+    # Keep only keys we asked for, as strings. A hallucinated key would address
+    # nothing on substitution, but dropping it here keeps the response honest.
+    translated = {
+        k: v.strip() for k, v in parsed.items()
+        if k in source and isinstance(v, str) and v.strip()
+    }
+
+    from app.translate import check_translation
+    from app.guard.validator import validate_write_gate
+
+    errors: list[dict] = []
+    warnings: list[dict] = []
+
+    missing = [k for k in source if k not in translated]
+    if missing:
+        warnings.append({
+            "rule": "translate_coverage",
+            "severity": "warning",
+            "message": f"{len(missing)} of {len(source)} CV fields came back untranslated",
+            "detail": "Those fields stay in English. Re-run translation to retry them.",
+        })
+
+    # Per-field number and entity preservation. Segment-wise, so an invented
+    # figure is attributed to the bullet that grew it.
+    #
+    # The entity check only means something on prose fields. Job titles, degrees
+    # and hobbies are *supposed* to change — the fact bank harvests "Test
+    # Engineer" and "Embedded Software" as entities, so checking them there
+    # reports every correct translation as a dropped proper noun.
+    prose_keys = {"about"}
+    for key, original in source.items():
+        candidate = translated.get(key)
+        if not candidate:
+            continue
+        is_prose = key in prose_keys or key.startswith("bullet.")
+        check = check_translation(original, candidate, factbank)
+        for e in check.get("errors", []):
+            errors.append({**e, "message": f"[{key}] {e['message']}"})
+        for w in check.get("warnings", []):
+            if not is_prose and w.get("rule") == "translate_entities":
+                continue
+            warnings.append({**w, "message": f"[{key}] {w['message']}"})
+
+    # Rules 5 and 9 on the whole translated CV — a hedge that collapsed into a
+    # certification is a property of the text, not of any single field.
+    gate = validate_write_gate("\n".join(translated.values()), factbank, body.language)
+    errors.extend(
+        {"rule": e.rule, "message": e.message, "detail": e.detail} for e in gate.errors
+    )
+    warnings.extend(
+        {"rule": w.rule, "message": w.message, "detail": w.detail} for w in gate.warnings
+    )
+
+    return {
+        "translated": translated,
+        "language": body.language,
+        "fields": len(source),
+        "passed": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
     }
 
 

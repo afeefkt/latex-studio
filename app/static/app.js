@@ -77,6 +77,7 @@ const btnApplyReset    = $("btn-apply-reset");
 const btnApplySettings = $("btn-apply-settings");
 const applySettingsPanel = $("apply-settings-panel");
 const applyStatus    = $("apply-status");
+const prefetchHint   = $("prefetch-hint");
 const fitReport      = $("fit-report");
 const applyStep2     = $("apply-step-2");
 const applyStep3     = $("apply-step-3");
@@ -1161,9 +1162,10 @@ loadLanguages();
 optLanguage.addEventListener("change", () => {
   if (optLanguage.value !== "en") {
     translateRow.classList.remove("hidden");
-    // Clear prior translation when language changes
+    // Clear prior translations when language changes — a German body and a
+    // German CV map are both wrong the moment the target becomes French.
     if (tailorResultData) {
-      tailorResultData = { ...tailorResultData, _translated_body: null };
+      tailorResultData = { ...tailorResultData, _translated_body: null, _translated_cv: null };
       translateStatus.textContent = "";
     }
   } else {
@@ -1176,6 +1178,7 @@ btnApplyReset.addEventListener("click", resetApplyFlow);
 btnApplySettings.addEventListener("click", () => applySettingsPanel.classList.toggle("hidden"));
 
 function resetApplyFlow() {
+  cancelPrefetch();
   jdTextarea.value = "";
   tailorResultData = null;
   applyStatus.innerHTML = "";
@@ -1188,6 +1191,90 @@ function resetApplyFlow() {
   [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
   jdTextarea.focus();
 }
+
+// ── Speculative pre-analysis ──────────────────────────────────────────────────
+//
+// The analysis is one long LLM round-trip, and the user spends a second or two
+// after pasting before they reach for the button. Starting the same request on
+// that pause hides most of the latency: by click time the answer is usually in
+// hand, and Analyse just renders it.
+//
+// This spends tokens on work the user has not committed to, so it is kept on a
+// short leash — one call per distinct ad, only after typing settles, and any
+// superseded call is aborted rather than left to finish and bill.
+
+const PREFETCH_DELAY_MS = 1200;
+// Above the 120 the button enforces: speculation should wait for something that
+// actually looks like a full posting rather than a half-finished paste.
+const PREFETCH_MIN_CHARS = 300;
+
+let prefetch = null;        // { jd, promise, controller, sink }
+let prefetchTimer = null;
+let analysisRunning = false;
+
+function setPrefetchHint(state) {
+  if (!prefetchHint) return;
+  prefetchHint.classList.toggle("ready", state === "ready");
+  prefetchHint.textContent =
+    state === "running" ? "preparing analysis…" :
+    state === "ready"   ? "✓ analysis ready" : "";
+}
+
+function cancelPrefetch() {
+  clearTimeout(prefetchTimer);
+  if (prefetch) {
+    try { prefetch.controller.abort(); } catch (_) {}
+    prefetch = null;
+  }
+  setPrefetchHint("");
+}
+
+function startPrefetch(jd) {
+  cancelPrefetch();
+  const controller = new AbortController();
+  // Progress messages from the stream go to a detached node — a speculative run
+  // must not write over the status line the user is actually reading.
+  const sink = document.createElement("div");
+
+  const promise = (async () => {
+    const resp = await fetch("/api/content/tailor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_ad_text: jd,
+        provider: applyProvider.value || null,
+        model: applyModel.value || null,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+    return await consumeTailorStream(resp, sink);
+  })();
+
+  const record = { jd, promise, controller, sink };
+  prefetch = record;
+  setPrefetchHint("running");
+
+  promise.then(
+    (data) => { if (prefetch === record) setPrefetchHint(data && data.success ? "ready" : ""); },
+    ()     => { if (prefetch === record) setPrefetchHint(""); },
+  );
+}
+
+function schedulePrefetch() {
+  clearTimeout(prefetchTimer);
+  if (analysisRunning) return;
+  const jd = jdTextarea.value.trim();
+  if (jd.length < PREFETCH_MIN_CHARS) { cancelPrefetch(); return; }
+  if (prefetch && prefetch.jd === jd) return;   // already running or done for this ad
+  cancelPrefetch();
+  prefetchTimer = setTimeout(() => startPrefetch(jd), PREFETCH_DELAY_MS);
+}
+
+jdTextarea.addEventListener("input", schedulePrefetch);
+// A cached result is answering the old question once the provider changes.
+applyProvider.addEventListener("change", cancelPrefetch);
+applyModel.addEventListener("change", cancelPrefetch);
 
 btnAnalyse.addEventListener("click", analyseJob);
 
@@ -1202,27 +1289,51 @@ async function analyseJob() {
     return;
   }
 
+  clearTimeout(prefetchTimer);
+  analysisRunning = true;
   btnAnalyse.disabled = true;
   btnAnalyse.textContent = "Analysing…";
   applyStatus.innerHTML = '<span class="spinner"></span> Reading the job ad…';
   [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
 
   try {
-    const resp = await fetch("/api/content/tailor", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        job_ad_text: jd,
-        provider: applyProvider.value || null,
-        model: applyModel.value || null,
-      }),
-    });
-    if (!resp.ok) {
-      const msg = await resp.text();
-      throw new Error(msg || `HTTP ${resp.status}`);
+    let doneData = null;
+
+    // Claim the speculative run when it was started for exactly this ad.
+    if (prefetch && prefetch.jd === jd) {
+      const claimed = prefetch;
+      prefetch = null;
+      setPrefetchHint("");
+      try {
+        doneData = await claimed.promise;
+      } catch (_) {
+        doneData = null;      // aborted or failed — fall through to a fresh run
+      }
+      // The stream reported a guard block or error into the detached sink.
+      // Replay it instead of paying for an identical second call.
+      if (!doneData && claimed.sink.innerHTML) {
+        applyStatus.innerHTML = claimed.sink.innerHTML;
+        return;
+      }
     }
 
-    const doneData = await consumeTailorStream(resp, applyStatus);
+    if (!doneData) {
+      cancelPrefetch();
+      const resp = await fetch("/api/content/tailor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_ad_text: jd,
+          provider: applyProvider.value || null,
+          model: applyModel.value || null,
+        }),
+      });
+      if (!resp.ok) {
+        const msg = await resp.text();
+        throw new Error(msg || `HTTP ${resp.status}`);
+      }
+      doneData = await consumeTailorStream(resp, applyStatus);
+    }
 
     if (doneData && doneData.success) {
       tailorResultData = doneData;
@@ -1237,6 +1348,7 @@ async function analyseJob() {
   } catch (e) {
     applyStatus.innerHTML = `<span class="apply-err">${e.message || "Request failed"}</span>`;
   } finally {
+    analysisRunning = false;
     btnAnalyse.disabled = false;
     btnAnalyse.textContent = "Analyse Job";
   }
@@ -1422,8 +1534,90 @@ async function generateDocs() {
   if (!tailorResultData) return;
   btnGenerate.disabled = true;
   btnGenerate.textContent = "Generating…";
-  generateStatus.innerHTML = '<span class="spinner"></span> Building documents, then compiling…';
   applyStep4.classList.add("hidden");
+
+  const lang = optLanguage.value;
+
+  // Auto-translate letter body when non-English is selected and translation hasn't run yet
+  if (lang !== "en" && !tailorResultData._translated_body &&
+      tailorResultData.assembled_body && docLetter.checked) {
+    btnGenerate.textContent = "Translating…";
+    generateStatus.innerHTML = '<span class="spinner"></span> Translating letter body to ' + lang + '…';
+    // Include the English hook paragraph so the full letter body is translated together
+    const hookText = tailorResultData.hook_text || "";
+    const bodyText = tailorResultData.assembled_body || "";
+    const textToTranslate = hookText ? hookText + "\n\n" + bodyText : bodyText;
+    try {
+      const tResp = await fetch("/api/content/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: textToTranslate,
+          language: lang,
+          provider: applyProvider.value || null,
+          model: applyModel.value || null,
+          job_ad_text: jdTextarea.value || "",
+        }),
+      });
+      if (!tResp.ok) throw new Error(`Translation HTTP ${tResp.status}`);
+      const tData = await tResp.json();
+      if (tData.errors && tData.errors.length) {
+        generateStatus.innerHTML = `<span class="apply-err">Translation blocked: ${tData.errors.map(e => e.message).join("; ")}</span>`;
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = "Generate";
+        return;
+      }
+      tailorResultData = { ...tailorResultData, _translated_body: tData.translated };
+      translateStatus.innerHTML = '<span class="apply-ok">✓ Auto-translated</span>';
+    } catch (e) {
+      generateStatus.innerHTML = `<span class="apply-err">Auto-translation failed: ${e.message}</span>`;
+      btnGenerate.disabled = false;
+      btnGenerate.textContent = "Generate";
+      return;
+    }
+    btnGenerate.textContent = "Generating…";
+  }
+
+  // Auto-translate CV content. Separate call from the letter: the CV is a map of
+  // short fields, not one prose blob, so it round-trips as keyed JSON.
+  if (lang !== "en" && !tailorResultData._translated_cv && docCv.checked) {
+    btnGenerate.textContent = "Translating CV…";
+    generateStatus.innerHTML = '<span class="spinner"></span> Translating CV content to ' + lang + '…';
+    try {
+      const cvResp = await fetch("/api/content/translate-cv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: lang,
+          selected_bullet_ids: tailorResultData.selected_bullet_ids || [],
+          optimized_bullets: tailorResultData.optimized_bullets || [],
+          job_ad_text: jdTextarea.value || "",
+          matched_phrases: (tailorResultData.matched || []).map(m => m.phrase || m.jd_phrase || "").filter(Boolean),
+          provider: applyProvider.value || null,
+          model: applyModel.value || null,
+        }),
+      });
+      if (!cvResp.ok) throw new Error(`CV translation HTTP ${cvResp.status}`);
+      const cvData = await cvResp.json();
+      if (cvData.errors && cvData.errors.length) {
+        generateStatus.innerHTML = `<span class="apply-err">CV translation blocked: ${cvData.errors.map(e => e.message).join("; ")}</span>`;
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = "Generate";
+        return;
+      }
+      tailorResultData = { ...tailorResultData, _translated_cv: cvData.translated || {} };
+      const n = Object.keys(cvData.translated || {}).length;
+      translateStatus.innerHTML = `<span class="apply-ok">✓ Auto-translated (${n} CV fields)</span>`;
+    } catch (e) {
+      generateStatus.innerHTML = `<span class="apply-err">CV translation failed: ${e.message}</span>`;
+      btnGenerate.disabled = false;
+      btnGenerate.textContent = "Generate";
+      return;
+    }
+    btnGenerate.textContent = "Generating…";
+  }
+
+  generateStatus.innerHTML = '<span class="spinner"></span> Building documents, then compiling…';
 
   const d = tailorResultData;
   const channel = document.querySelector('input[name="channel"]:checked')?.value || "portal";
@@ -1463,6 +1657,7 @@ async function generateDocs() {
         edited_body: d._translated_body || d.edited_body || null,
         job_ad_text: $("jd-textarea").value || "",
         matched_phrases: (d.matched || []).map(m => m.jd_phrase || "").filter(Boolean),
+        translated_cv: d._translated_cv || {},
       }),
     });
 
@@ -1527,13 +1722,17 @@ function renderDownloads(out) {
 // ── Translate button ─────────────────────────────────────────────────────────
 btnTranslate.addEventListener("click", async () => {
   if (!tailorResultData) return;
-  const text = tailorResultData.assembled_body;
-  if (!text) {
+  if (!tailorResultData.assembled_body) {
     translateStatus.innerHTML = '<span class="apply-err">No letter body to translate. Run the analysis first.</span>';
     return;
   }
   const lang = optLanguage.value;
   if (!lang || lang === "en") return;
+
+  // Include English hook so the full letter body is translated together
+  const hookText = tailorResultData.hook_text || "";
+  const bodyText = tailorResultData.assembled_body || "";
+  const text = hookText ? hookText + "\n\n" + bodyText : bodyText;
 
   btnTranslate.disabled = true;
   btnTranslate.textContent = "Translating…";

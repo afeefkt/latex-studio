@@ -552,12 +552,19 @@ def create_document(name: str, template_id: str, variables: dict | None = None,
     default_vars = tdata.get("variables", {})
     merged = {**default_vars, **variables}
 
-    # Auto-inject and adapt facts for CV templates
+    # Auto-inject and adapt facts for CV templates.
+    # A caller-supplied `facts` wins over the file: /generate passes a translated
+    # copy, and reloading from disk here would silently revert the summary, job
+    # title and every other identity field to English while the separately-built
+    # role_groups stayed translated. Matches render_template's precedence.
     kind = tdata.get("kind", "cv")
-    if kind == "cv" and FACTS_PATH.exists():
-        facts_raw = load_facts()
-        adapted = adapt_facts(facts_raw, template_id, merged.get("selected_bullet_ids"))
-        merged = {**merged, "facts": adapted}
+    if kind == "cv":
+        facts_raw = merged.get("facts")
+        if not facts_raw and FACTS_PATH.exists():
+            facts_raw = load_facts()
+        if facts_raw:
+            adapted = adapt_facts(facts_raw, template_id, merged.get("selected_bullet_ids"))
+            merged = {**merged, "facts": adapted}
 
     # Determine target folder
     if kind == "letter":

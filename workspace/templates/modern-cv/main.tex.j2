@@ -65,9 +65,9 @@
 
 % ── Skills ──
 \section{\VAR{ L.get(language, {}).get('skills', 'Skills') }}
-\textbf{Expert:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\[4pt]
-\textbf{Proficient:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\[4pt]
-\textbf{Familiar:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
+\textbf{\VAR{ L.get(language, {}).get('expert', 'Expert') }:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\[4pt]
+\textbf{\VAR{ L.get(language, {}).get('proficient', 'Proficient') }:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\[4pt]
+\textbf{\VAR{ L.get(language, {}).get('familiar', 'Familiar') }:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
 
 % ── Education ──
 \section{\VAR{ L.get(language, {}).get('education', 'Education') }}

@@ -1035,6 +1035,14 @@ kbd {
   padding: 7px 10px;
   font-size: 12px;
 }
+/* Speculative-analysis indicator. Deliberately quiet — it reports work the
+   user did not ask for and must never compete with the real status line. */
+.prefetch-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+.prefetch-hint.ready { color: var(--ok, #4ade80); }
 .btn-primary {
   background: var(--accent);
   color: var(--bg);

@@ -11,12 +11,16 @@
 
 \definecolor{accent}{HTML}{2B579A}
 
+% Suppress KOMA-Script's default before-skip on subsection so role entries
+% sit flush under the section rule rather than floating down half a line.
+\RedeclareSectionCommand[beforeskip=0.4em,afterskip=0.2em]{subsection}
+
 \newcommand{\sectionheader}[1]{%
   \vspace{1.2em}
   \noindent{\large\bfseries\color{accent} #1}\par
   \vspace{2pt}
   \noindent\rule{\textwidth}{0.4pt}
-  \vspace{0.6em}
+  \vspace{0.3em}
 }
 
 \begin{document}
@@ -46,7 +50,7 @@
 \BLOCK{ endfor }
 \end{itemize}
 \BLOCK{ if role.tools }
-\small\textit{Tools:} \VAR{ role.tools | join(', ') | tex_escape }\par
+\small\textit{\VAR{ L.get(language, {}).get('tools', 'Tools') }:} \VAR{ role.tools | join(', ') | tex_escape }\par
 \BLOCK{ endif }
 \medskip
 \BLOCK{ endfor }
@@ -62,13 +66,13 @@
 
 \sectionheader{\VAR{ L.get(language, {}).get('skills', 'Skills') }}
 \BLOCK{ if facts.skills.expert }
-\textbf{Expert:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\
+\textbf{\VAR{ L.get(language, {}).get('expert', 'Expert') }:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\
 \BLOCK{ endif }
 \BLOCK{ if facts.skills.proficient }
-\textbf{Proficient:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\
+\textbf{\VAR{ L.get(language, {}).get('proficient', 'Proficient') }:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\
 \BLOCK{ endif }
 \BLOCK{ if facts.skills.familiar }
-\textbf{Familiar:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
+\textbf{\VAR{ L.get(language, {}).get('familiar', 'Familiar') }:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
 \BLOCK{ endif }
 
 \BLOCK{ if facts.awards }
@@ -89,7 +93,7 @@
 
 \vfill
 \begin{center}
-  \textcolor{gray}{\small Work authorisation: \VAR{ facts.identity.work_authorisation | tex_escape }}
+  \textcolor{gray}{\small \VAR{ L.get(language, {}).get('work_auth', 'Work authorisation') }: \VAR{ facts.identity.work_authorisation | tex_escape }}
 \end{center}
 
 \end{document}
