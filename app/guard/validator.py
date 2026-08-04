@@ -15,8 +15,11 @@ _rules = yaml.safe_load(_RULES_PATH.read_text(encoding="utf-8")) if _RULES_PATH.
 HOOK_KEYS: set[str] = set(_rules.get("hook_keys", []))
 LENGTH_TOLERANCE: float = float(_rules.get("length_tolerance", 0.2))
 REFERENCE_WORD_COUNT: int = int(_rules.get("reference_word_count", 250))
+_cert_raw = _rules.get("certification_patterns", [])
 CERT_PATTERNS: list[re.Pattern] = [
-    re.compile(p) for p in _rules.get("certification_patterns", [])
+    re.compile(p) for p in (
+        _cert_raw if isinstance(_cert_raw, list) else _cert_raw.get("en", [])
+    )
 ]
 NUMBER_RE = re.compile(_rules.get("number_pattern", r"\d+"))
 ENTITY_RE = re.compile(_rules.get("entity_pattern", r"[A-Z][a-z]+(?:\s+[A-Z][a-zA-Z]+)+"))
@@ -70,7 +73,7 @@ def validate_tailor_response(
         _rule_6_numbers(assembled_text, facts, errors)
         _rule_7_entities(assembled_text, facts, job_ad_text, warnings)
         _rule_8_length(assembled_text, warnings)
-        _rule_9_certifications(assembled_text, facts, errors)
+        _rule_9_certifications(assembled_text, facts, errors, warnings=warnings)
 
     return ValidationResult(
         passed=len(errors) == 0,
@@ -377,7 +380,7 @@ def validate_assembled_text(
     _rule_6_numbers(text, facts, errors)
     _rule_7_entities(text, facts, job_ad_text, warnings)
     _rule_8_length(text, warnings)
-    _rule_9_certifications(text, facts, errors, language=language)
+    _rule_9_certifications(text, facts, errors, warnings=warnings, language=language)
 
     return ValidationResult(
         passed=len(errors) == 0,

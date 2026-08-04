@@ -1,9 +1,11 @@
 # ── Phase 5: OpenAI-compatible provider base class ──
 
+import asyncio
 import json
 import os
+import random
 import ssl
-from typing import AsyncIterator
+from typing import AsyncIterator, Coroutine, Union
 
 import httpx
 
@@ -44,10 +46,13 @@ class OpenAICompatProvider(LLMProvider):
 
     def chat(
         self, messages: list[dict], *, stream: bool = False
-    ) -> "AsyncIterator[str]":
+    ) -> "Union[AsyncIterator[str], Coroutine[None, None, str]]":
         if stream:
             return self._chat_stream(messages)   # async generator — iterable directly
         return self._chat_sync(messages)          # coroutine — must be awaited
+
+    _RETRYABLE_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+    _MAX_RETRIES: int = 3
 
     async def _chat_sync(self, messages: list[dict]) -> str:
         payload = {
@@ -55,9 +60,17 @@ class OpenAICompatProvider(LLMProvider):
             "messages": messages,
             "stream": False,
         }
-        resp = await self._client.post("/chat/completions", json=payload)
-        if resp.status_code >= 400:
-            raise ValueError(f"API {resp.status_code}: {resp.text[:400]}")
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_RETRIES):
+            resp = await self._client.post("/chat/completions", json=payload)
+            if resp.status_code < 400:
+                break
+            last_exc = ValueError(f"API {resp.status_code}: {resp.text[:400]}")
+            if resp.status_code not in self._RETRYABLE_CODES or attempt == self._MAX_RETRIES - 1:
+                raise last_exc
+            await asyncio.sleep(2 ** attempt + random.uniform(0, 0.5))
+        if last_exc is not None:
+            raise last_exc
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})

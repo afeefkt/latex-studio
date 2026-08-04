@@ -53,9 +53,6 @@ def _ensure_header() -> None:
         csv.writer(f).writerows(new_lines)
     os.replace(tmp, APPS_CSV)
 
-    global COLUMNS
-    COLUMNS = new_header
-
 
 def log_application(
     company: str = "",
@@ -95,11 +92,8 @@ def list_applications() -> list[dict]:
     if not APPS_CSV.exists():
         return []
     rows = []
-    all_cols = COLUMNS + [c for c in NEW_COLUMNS if c not in COLUMNS]
     with open(APPS_CSV, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f, fieldnames=all_cols, restkey="_extra")
-        # Skip header row if fieldnames were auto-detected
-        next(reader, None)
+        reader = csv.DictReader(f, restkey="_extra")
         for row in reader:
             row["matched_count"] = int(row.get("matched_count", 0) or 0)
             row["unmatched_count"] = int(row.get("unmatched_count", 0) or 0)

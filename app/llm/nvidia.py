@@ -16,5 +16,5 @@ class NvidiaProvider(OpenAICompatProvider):
     def _get_api_key(self) -> str:
         key = os.getenv("NVIDIA_API_KEY", "")
         if not key:
-            raise ValueError("NVIDIA_API_KEY not set in .env. Get one at https://build.nvidia.com")
+            raise ValueError("NVIDIA_API_KEY not set in .env. Get one at https://integrate.api.nvidia.com")
         return key

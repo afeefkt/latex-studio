@@ -530,6 +530,8 @@ class GenerateRequest(BaseModel):
 
 
 def _slugify(text: str, fallback: str) -> str:
+    # Dash-separated, used for PDF/folder names. Intentionally differs from
+    # importer._slugify which uses underscores for YAML fact keys.
     return re.sub(r"[^a-z0-9]+", "-", (text or "").strip().lower()).strip("-") or fallback
 
 

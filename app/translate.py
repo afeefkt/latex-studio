@@ -3,7 +3,6 @@
 import re
 
 from app.guard.factbank import FactBank
-from app.guard.validator import NUMBER_RE
 
 # Separator-normalised digit multisets — German writes 3,5 for 3.5 and 1.000
 # for 1,000, so literal string comparison false-errors on a correct translation.

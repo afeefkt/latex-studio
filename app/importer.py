@@ -36,6 +36,8 @@ def _parse_date_range(dates_str: str) -> tuple[str, str]:
 
 
 def _slugify(text: str) -> str:
+    # Underscore-separated, used for YAML fact keys (role IDs, etc.). Intentionally
+    # differs from content._slugify which uses dashes for PDF/folder names.
     return re.sub(r"[^a-z0-9]+", "_", text.strip().lower()).strip("_")
 
 

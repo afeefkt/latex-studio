@@ -92,6 +92,11 @@ def _extract_entities(raw: dict) -> set[str]:
 
 
 def _extract_skills(raw: dict) -> set[str]:
+    """Collect all skills from every tier.
+    Consumed by: content.py (CV translation — merged with all_entities to build
+    the do-not-translate term list so skill names are preserved verbatim).
+    Not yet used in any validator rule; reserved for future skill-provenance
+    checks (e.g. 'does this claimed skill appear in any bullet?')."""
     skills: set[str] = set()
     for tier in ("expert", "proficient", "familiar"):
         for s in raw.get("skills", {}).get(tier, []):
