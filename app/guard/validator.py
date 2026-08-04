@@ -30,6 +30,7 @@ def validate_tailor_response(
     job_ad_text: str,
     facts: FactBank | None = None,
     assembled_text: str | None = None,
+    language: str = "en",
 ) -> ValidationResult:
     """
     Validate an LLM tailoring response against facts.yaml.
@@ -73,7 +74,7 @@ def validate_tailor_response(
         _rule_6_numbers(assembled_text, facts, errors)
         _rule_7_entities(assembled_text, facts, job_ad_text, warnings)
         _rule_8_length(assembled_text, warnings)
-        _rule_9_certifications(assembled_text, facts, errors, warnings=warnings)
+        _rule_9_certifications(assembled_text, facts, errors, warnings=warnings, language=language)
 
     return ValidationResult(
         passed=len(errors) == 0,
@@ -332,7 +333,8 @@ def _rule_9_certifications(text: str, facts: FactBank, errors: list,
     all_certs: set[str] = set()
 
     for cp in facts.certifications_held:
-        all_certs.add(cp.lower().strip())
+        if isinstance(cp, str):
+            all_certs.add(cp.lower().strip())
     for ip in facts.certifications_in_progress:
         if isinstance(ip, dict):
             all_certs.add(ip.get("name", "").lower().strip())

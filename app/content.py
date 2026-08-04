@@ -176,6 +176,7 @@ def _cv_vars(facts: dict, bullet_ids: list[str], optimized_map: dict,
     return {
         "facts": facts,
         "role_groups": role_groups,
+        "selected_bullet_ids": bullet_ids,
         "matched_skills": matched_skills,
         "other_skills": other_skills,
         "language_rows": _language_rows(facts),
@@ -225,7 +226,9 @@ def _build_hook_text(hook_key: str, company_name: str, role_title: str, focus_ph
         ("{focus_phrase}", focus_phrase),
     ):
         template = template.replace(slot, tex_escape(value))
-    return " ".join(template.split())
+    # The slot values above are escaped, but the AUTHORED prose around them can
+    # still contain &, %, $, _, # — escape the full assembled string once.
+    return " ".join(tex_escape(template).split())
 
 
 def score_fit(matched: list[dict], unmatched: list[str], requirements: list[dict] | None = None) -> dict:
@@ -342,6 +345,16 @@ async def tailor_letter(body: TailorRequest):
 
             logger.info(f"Content mode: LLM returned {len(full)} chars")
 
+            # Empty response — the LLM streamed zero tokens (common causes:
+            # missing/invalid API key, wrong model name, DeepSeek API returning
+            # 200 with no content for oversized prompts or quota exhaustion).
+            if not full.strip():
+                logger.error(f"Content mode: LLM returned empty response "
+                             f"(provider={provider or 'default'}, model={model or 'auto'}, "
+                             f"facts_size={len(facts_yaml_block)} chars, jd_size={len(job_ad)} chars)")
+                yield f"event: error\ndata: {json.dumps({'error': 'The AI returned an empty response. Check your API key in .env, verify the model name, or check provider status.'})}\n\n"
+                return
+
             # Extract JSON from response
             json_match = re.search(r"```json\s*([\s\S]*?)```", full)
             if json_match:
@@ -353,6 +366,8 @@ async def tailor_letter(body: TailorRequest):
             try:
                 parsed = json.loads(json_str)
             except json.JSONDecodeError as e:
+                preview = json_str[:200].replace("\n", "\\n")
+                logger.error(f"Content mode: JSON parse failed. json_str_len={len(json_str)}, preview={preview}")
                 yield f"event: error\ndata: {json.dumps({'error': f'Failed to parse LLM response as JSON: {e}'})}\n\n"
                 return
 

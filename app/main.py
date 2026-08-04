@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import app.compile  # noqa: F401 -- triggers MiKTeX PATH patch on import
 import app.docs as docs
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 
 from app.compile import compile_doc
 from app.docs import (
+    _safe_target,
     create_document,
     create_profile,
     delete_document,
@@ -99,6 +101,40 @@ class SaveBody(BaseModel):
 async def save_doc(doc_path: str, body: SaveBody):
     write_file(doc_path, body.content, body.file)
     return {"saved": True}
+
+
+# ── Workspace file upload / delete ────────────────────────────────────────────
+
+from fastapi import UploadFile, File as FastFile
+
+
+@app.post("/api/docs/{doc_path:path}/upload")
+async def upload_workspace_file(doc_path: str, file: UploadFile = FastFile(...)):
+    if not file.filename:
+        raise HTTPException(400, "No file selected")
+    if "/" in file.filename or "\\" in file.filename or file.filename.startswith("."):
+        raise HTTPException(400, "Invalid filename")
+    allowed = {".jpg", ".jpeg", ".png", ".gif", ".pdf", ".eps", ".svg"}
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(400, f"Only image and PDF files can be uploaded (got {suffix})")
+    target = _safe_target(doc_path) / file.filename
+    content = await file.read()
+    target.write_bytes(content)
+    return {"ok": True, "filename": file.filename, "bytes": len(content)}
+
+
+@app.delete("/api/docs/{doc_path:path}/file/{filename:path}")
+async def delete_workspace_file(doc_path: str, filename: str):
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        raise HTTPException(400, "Invalid filename")
+    if filename in ("main.tex", "main.tex.j2"):
+        raise HTTPException(400, "Cannot delete main.tex — the document would become uncompileable")
+    target = _safe_target(doc_path) / filename
+    if not target.exists():
+        raise HTTPException(404, f"File '{filename}' not found")
+    target.unlink()
+    return {"ok": True}
 
 
 # ── Document deletion ─────────────────────────────────────────────────────────

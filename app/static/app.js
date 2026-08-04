@@ -26,6 +26,7 @@ let savedScrollTop  = 0;
 let savedScrollLeft = 0;
 let cmView        = null;          // CodeMirror EditorView instance
 let sidebarVisible = true;
+let templatesCache = [];    // cached template list for renderDocList
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -174,23 +175,16 @@ async function loadDocList() {
 async function loadTemplateList() {
   try {
     const data = await fetchJSON("/api/templates");
-    renderTemplateList(data.templates);
+    templatesCache = data.templates || [];
   } catch (_) {}
 }
 
-function renderTemplateList(templates) {
-  if (!templates || !templates.length) {
-    $("template-list").innerHTML = '<div class="sidebar-empty">No templates loaded</div>';
-    return;
-  }
-  // Count only those with has_template
-  const available = templates.filter(t => t.has_template);
-  const countEl = $("template-list-count");
-  if (countEl) countEl.textContent = available.length;
+function renderTemplateSection() {
+  const available = templatesCache.filter(t => t.has_template);
+  if (!available.length) return "";
 
   let html = "";
-  for (const t of templates) {
-    if (!t.has_template) continue;
+  for (const t of available) {
     const icon = t.icon || "📄";
     const colour = t.colour || "var(--accent)";
     const kind = t.kind || "cv";
@@ -199,14 +193,13 @@ function renderTemplateList(templates) {
       <span class="template-name">${escapeHTML(t.name)}</span>
     </div>`;
   }
-  $("template-list").innerHTML = html || '<div class="sidebar-empty">No templates</div>';
-
-  // Click to create document from template
-  $("template-list").querySelectorAll(".template-item").forEach(el => {
-    el.addEventListener("click", () => {
-      newFromTemplate(el.dataset.tplId, el.dataset.tplKind);
-    });
-  });
+  return `<div class="doc-section">
+    <div class="doc-section-header">📋 Templates <span class="doc-section-count">${available.length}</span></div>
+    ${html}
+    <div class="template-item" id="tmpl-import-link" style="font-size:10px;color:var(--text-dim);padding-left:10px">
+      <span>+ Import .tex template…</span>
+    </div>
+  </div>`;
 }
 
 async function newFromTemplate(tplId, kind) {
@@ -230,7 +223,8 @@ async function newFromTemplate(tplId, kind) {
 }
 
 function renderDocList(docs) {
-  if (!docs || !docs.length) {
+  if (!docs) return;
+  if (!docs.length && !templatesCache.length) {
     docList.innerHTML = '<div class="sidebar-empty">No documents yet.</div>';
     return;
   }
@@ -258,19 +252,32 @@ function renderDocList(docs) {
     </div>`;
   };
 
-  const _section = (title, items) => {
+  // Collapsed state: "generated-cvs" starts collapsed; others default to open
+  function _section(key, title, items) {
     if (!items.length) return "";
+    const stored = localStorage.getItem("section-collapsed-" + key);
+    const collapsed = stored !== null ? stored === "1" : (key === "generated-cvs");
+    const chevron = collapsed ? "▸" : "▾";
     return `<div class="doc-section">
-      <div class="doc-section-header">${title} <span class="doc-section-count">${items.length}</span></div>
-      ${items.map(_row).join("")}
+      <div class="doc-section-header doc-section-toggle" data-section="${key}">
+        <span class="section-chevron${collapsed ? ' collapsed' : ''}">${chevron}</span>
+        ${title} <span class="doc-section-count">${items.length}</span>
+      </div>
+      <div class="doc-section-body${collapsed ? ' collapsed' : ''}">
+        ${items.map(_row).join("")}
+      </div>
     </div>`;
-  };
+  }
 
-  let html = _section("📂 Manual CVs", manualCVs) +
-             _section("🤖 Generated CVs", generatedCVs) +
-             _section("✉️ Cover Letters", letters);
+  // Section order reflects the primary workflow
+  let html = _section("cover-letters", "✉️ Cover Letters", letters) +
+             _section("custom-cvs", "📂 Custom CVs", manualCVs) +
+             _section("generated-cvs", "🤖 Generated CVs", generatedCVs);
 
-  // Add Fact Bank entry
+  // Append templates section inside doc-list
+  html += renderTemplateSection();
+
+  // Fact Bank entry
   const factsActive = currentDoc && currentDoc.path === "facts" ? " active" : "";
   html += `<div class="doc-item doc-item-facts${factsActive}" data-path="facts" data-kind="facts">
     <span class="doc-icon">📋</span>
@@ -279,17 +286,42 @@ function renderDocList(docs) {
 
   docList.innerHTML = html;
 
-  // Click handlers
+  // Section toggle handlers
+  docList.querySelectorAll(".doc-section-toggle").forEach(hdr => {
+    hdr.addEventListener("click", () => {
+      const key = hdr.dataset.section;
+      const body = hdr.nextElementSibling;
+      const chevron = hdr.querySelector(".section-chevron");
+      const isCollapsed = body.classList.toggle("collapsed");
+      chevron.classList.toggle("collapsed", isCollapsed);
+      chevron.textContent = isCollapsed ? "▸" : "▾";
+      localStorage.setItem("section-collapsed-" + key, isCollapsed ? "1" : "0");
+    });
+  });
+
+  // Doc item click handlers
   docList.querySelectorAll(".doc-item").forEach(el => {
     el.addEventListener("click", () => switchDocument(el.dataset.path, el.dataset.kind));
   });
-
   docList.querySelectorAll(".doc-delete").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       deleteDocument(btn.dataset.del, btn);
     });
   });
+
+  // Template item click handlers
+  docList.querySelectorAll(".template-item").forEach(el => {
+    el.addEventListener("click", () => {
+      if (el.dataset.tplId) newFromTemplate(el.dataset.tplId, el.dataset.tplKind);
+    });
+  });
+
+  // Import template link
+  const importLink = docList.querySelector("#tmpl-import-link");
+  if (importLink) {
+    importLink.addEventListener("click", () => { showMapTemplatePanel(); });
+  }
 }
 
 async function deleteDocument(path, btn) {
@@ -366,6 +398,10 @@ async function switchDocument(path, kind) {
   docList.querySelectorAll(".doc-item").forEach(el => {
     el.classList.toggle("active", el.dataset.path === path);
   });
+
+  // Refresh the file manager if it's visible
+  const fm = document.getElementById("file-manager-panel");
+  if (fm && !fm.classList.contains("hidden")) loadFileManager();
 
   // Load file list
   try {
@@ -1171,6 +1207,11 @@ optLanguage.addEventListener("change", () => {
   } else {
     translateRow.classList.add("hidden");
     translateStatus.textContent = "";
+    // Reverting to English: the translated body and CV map are now unused.
+    // Forgetting them here keeps generateDocs from shipping stale German text.
+    if (tailorResultData) {
+      tailorResultData = { ...tailorResultData, _translated_body: null, _translated_cv: null };
+    }
   }
 });
 
@@ -1179,6 +1220,7 @@ btnApplySettings.addEventListener("click", () => applySettingsPanel.classList.to
 
 function resetApplyFlow() {
   cancelPrefetch();
+  if (analysisController) { analysisController.abort(); analysisController = null; }
   jdTextarea.value = "";
   tailorResultData = null;
   applyStatus.innerHTML = "";
@@ -1189,6 +1231,7 @@ function resetApplyFlow() {
   translateRow.classList.add("hidden");
   optLanguage.value = "en";
   [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
+  setProgressStep(1);
   jdTextarea.focus();
 }
 
@@ -1210,7 +1253,8 @@ const PREFETCH_MIN_CHARS = 300;
 
 let prefetch = null;        // { jd, promise, controller, sink }
 let prefetchTimer = null;
-let analysisRunning = false;
+let analysisRunning    = false;
+let analysisController = null;   // AbortController for direct (non-prefetch) analysis fetch
 
 function setPrefetchHint(state) {
   if (!prefetchHint) return;
@@ -1319,9 +1363,11 @@ async function analyseJob() {
 
     if (!doneData) {
       cancelPrefetch();
+      analysisController = new AbortController();
       const resp = await fetch("/api/content/tailor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: analysisController.signal,
         body: JSON.stringify({
           job_ad_text: jd,
           provider: applyProvider.value || null,
@@ -1341,14 +1387,17 @@ async function analyseJob() {
       renderFitReport(doneData);
       applyStep2.classList.remove("hidden");
       applyStep3.classList.remove("hidden");
+      setProgressStep(3);
       applyStep2.scrollIntoView({ behavior: "smooth", block: "start" });
     } else if (doneData) {
       applyStatus.innerHTML = `<span class="apply-err">${doneData.message || "Analysis failed"}</span>`;
     }
   } catch (e) {
+    if (e.name === "AbortError") return;  // cancelled by user — resetApplyFlow handles UI
     applyStatus.innerHTML = `<span class="apply-err">${e.message || "Request failed"}</span>`;
   } finally {
     analysisRunning = false;
+    analysisController = null;
     btnAnalyse.disabled = false;
     btnAnalyse.textContent = "Analyse Job";
   }
@@ -1371,6 +1420,7 @@ async function consumeTailorStream(resp, statusEl) {
     buffer = lines.pop() || "";
 
     for (const line of lines) {
+      if (line === "") { currentEvent = "message"; continue; }
       if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
       if (!line.startsWith("data: ")) continue;
       try {
@@ -1605,8 +1655,15 @@ async function generateDocs() {
         btnGenerate.textContent = "Generate";
         return;
       }
-      tailorResultData = { ...tailorResultData, _translated_cv: cvData.translated || {} };
-      const n = Object.keys(cvData.translated || {}).length;
+      const cvTranslated = cvData.translated;
+      if (!cvTranslated || Object.keys(cvTranslated).length === 0) {
+        generateStatus.innerHTML = '<span class="apply-err">CV translation returned empty — check provider or retry.</span>';
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = "Generate";
+        return;
+      }
+      tailorResultData = { ...tailorResultData, _translated_cv: cvTranslated };
+      const n = Object.keys(cvTranslated).length;
       translateStatus.innerHTML = `<span class="apply-ok">✓ Auto-translated (${n} CV fields)</span>`;
     } catch (e) {
       generateStatus.innerHTML = `<span class="apply-err">CV translation failed: ${e.message}</span>`;
@@ -1669,6 +1726,7 @@ async function generateDocs() {
     generateStatus.innerHTML = `<span class="apply-ok">✓ Generated — ${out.cv_variant}</span>`;
     renderDownloads(out);
     applyStep4.classList.remove("hidden");
+    setProgressStep(4);
     applyStep4.scrollIntoView({ behavior: "smooth", block: "start" });
     loadDocList();
   } catch (e) {
@@ -1718,6 +1776,141 @@ function renderDownloads(out) {
     });
   });
 }
+
+// ── Progress bar ──────────────────────────────────────────────────────────────
+function setProgressStep(n) {
+  document.querySelectorAll(".ap-node").forEach(el => {
+    el.classList.toggle("active", +el.dataset.step <= n);
+  });
+  const pct = Math.max(0, (n - 1) / 3 * 100);
+  const fill = document.getElementById("ap-fill");
+  if (fill) fill.style.width = pct + "%";
+}
+
+// ── Panel tabs (AI Help | Files) ──────────────────────────────────────────────
+document.querySelectorAll(".panel-tab").forEach(tab => {
+  tab.addEventListener("click", () => switchPanel(tab.dataset.panel));
+});
+
+function switchPanel(panel) {
+  document.querySelectorAll(".panel-tab").forEach(t => t.classList.toggle("active", t.dataset.panel === panel));
+  const controls = document.getElementById("chat-controls");
+  const msgs = document.getElementById("chat-messages");
+  const inputRow = document.getElementById("chat-input-row");
+  const fm = document.getElementById("file-manager-panel");
+  const isAI = panel === "ai";
+  if (controls) controls.classList.toggle("hidden", !isAI);
+  if (msgs) msgs.classList.toggle("hidden", !isAI);
+  if (inputRow) inputRow.classList.toggle("hidden", !isAI);
+  if (fm) fm.classList.toggle("hidden", isAI);
+  if (!isAI) loadFileManager();
+}
+
+// ── File manager ──────────────────────────────────────────────────────────────
+async function loadFileManager() {
+  if (!currentDoc) return;
+  const fmList = document.getElementById("fm-file-list");
+  if (!fmList) return;
+  fmList.innerHTML = '<span class="spinner"></span> Loading…';
+  try {
+    const resp = await fetch(`/api/docs/${currentDoc.path}/files`);
+    const data = await resp.json();
+    const files = (data.files || []).filter(f => f !== "document.json");
+    const fmRows = files.map(f => {
+      const ext = f.split(".").pop().toLowerCase();
+      const icons = { tex: "📝", sty: "🎨", cls: "📦", yaml: "📋", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", pdf: "📕", eps: "📐", svg: "🎨" };
+      const icon = icons[ext] || "📄";
+      return `<div class="fm-row">
+        <span class="fm-icon">${icon}</span>
+        <span class="fm-name">${escapeHTML(f)}</span>
+        <button class="fm-delete" data-fm-file="${escapeHTML(f)}" title="Delete">×</button>
+      </div>`;
+    }).join("");
+    fmList.innerHTML = fmRows || '<div style="padding:8px 10px;color:var(--text-dim);font-size:11px">No editable files</div>';
+
+    fmList.querySelectorAll(".fm-delete").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteWorkspaceFile(btn.dataset.fmFile, btn);
+      });
+    });
+  } catch (_) {
+    fmList.innerHTML = '<div style="padding:8px 10px;color:var(--text-dim);font-size:11px">Could not load files</div>';
+  }
+}
+
+async function deleteWorkspaceFile(filename, btn) {
+  if (!currentDoc) return;
+  if (!confirm(`Delete "${filename}" from workspace?`)) return;
+  btn.disabled = true;
+  const fmStatus = document.getElementById("fm-status");
+  try {
+    const resp = await fetch(`/api/docs/${currentDoc.path}/file/${filename}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+    if (fmStatus) fmStatus.innerHTML = '<span style="color:var(--ok)">Deleted</span>';
+    loadFileManager();
+  } catch (e) {
+    if (fmStatus) fmStatus.innerHTML = `<span style="color:var(--error)">${e.message}</span>`;
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("fm-upload-input")?.addEventListener("change", async (e) => {
+  if (!currentDoc) return;
+  const file = e.target.files[0];
+  if (!file) return;
+  const fmStatus = document.getElementById("fm-status");
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const resp = await fetch(`/api/docs/${currentDoc.path}/upload`, { method: "POST", body: form });
+    if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+    if (fmStatus) fmStatus.innerHTML = `<span style="color:var(--ok)">Uploaded ${escapeHTML(file.name)}</span>`;
+    loadFileManager();
+  } catch (err) {
+    if (fmStatus) fmStatus.innerHTML = `<span style="color:var(--error)">${err.message}</span>`;
+  }
+  e.target.value = "";
+});
+
+document.getElementById("fm-import-template")?.addEventListener("click", () => { showMapTemplatePanel(); });
+
+// ── Sidebar resize handle ─────────────────────────────────────────────────────
+(function initSidebarResize() {
+  const sidebar = document.getElementById("sidebar");
+  const handle = document.getElementById("sidebar-resize-handle");
+  if (!sidebar || !handle) return;
+
+  let dragging = false;
+  let startX = 0;
+  let startW = 0;
+
+  handle.addEventListener("mousedown", (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startW = sidebar.offsetWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const w = Math.max(160, Math.min(360, startW + (e.clientX - startX)));
+    sidebar.style.width = w + "px";
+    sidebar.style.minWidth = w + "px";
+    document.documentElement.style.setProperty("--sidebar-w", w + "px");
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    const w = sidebar.offsetWidth;
+    localStorage.setItem("sidebar-width", w);
+  });
+})();
 
 // ── Translate button ─────────────────────────────────────────────────────────
 btnTranslate.addEventListener("click", async () => {
@@ -2093,8 +2286,8 @@ btnNewProfile.addEventListener("click", async () => {
 
 (async function init() {
   await loadProfiles();
-  await loadDocList();
   loadTemplateList();
+  await loadDocList();
   try {
     const resp = await fetch("/api/docs");
     const data = await resp.json();

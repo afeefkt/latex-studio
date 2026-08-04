@@ -65,9 +65,10 @@
 
 % ── Skills ──
 \section{\VAR{ L.get(language, {}).get('skills', 'Skills') }}
-\textbf{\VAR{ L.get(language, {}).get('expert', 'Expert') }:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\[4pt]
-\textbf{\VAR{ L.get(language, {}).get('proficient', 'Proficient') }:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\[4pt]
-\textbf{\VAR{ L.get(language, {}).get('familiar', 'Familiar') }:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
+\BLOCK{ if facts.skills.expert }\textbf{\VAR{ L.get(language, {}).get('expert', 'Expert') }:} \VAR{ facts.skills.expert | join(', ') | tex_escape } \\[4pt]
+\BLOCK{ endif }\BLOCK{ if facts.skills.proficient }\textbf{\VAR{ L.get(language, {}).get('proficient', 'Proficient') }:} \VAR{ facts.skills.proficient | join(', ') | tex_escape } \\[4pt]
+\BLOCK{ endif }\BLOCK{ if facts.skills.familiar }\textbf{\VAR{ L.get(language, {}).get('familiar', 'Familiar') }:} \VAR{ facts.skills.familiar | join(', ') | tex_escape }
+\BLOCK{ endif }
 
 % ── Education ──
 \section{\VAR{ L.get(language, {}).get('education', 'Education') }}
@@ -90,7 +91,8 @@
 \BLOCK{ for award in facts.awards }
 \textbf{\VAR{ award.title | tex_escape }} \hfill \VAR{ award.year | tex_escape } \\
 \VAR{ award.org | tex_escape } \\
-\small \VAR{ award.description | tex_escape }
+\BLOCK{ if award.description }\small \VAR{ award.description | tex_escape }
+\BLOCK{ endif }
 \BLOCK{ endfor }
 \BLOCK{ endif }
 

@@ -54,6 +54,21 @@ class OpenAICompatProvider(LLMProvider):
     _RETRYABLE_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
     _MAX_RETRIES: int = 3
 
+    @staticmethod
+    def _safe_json(resp) -> dict:
+        try:
+            return resp.json()
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"API returned invalid JSON: {resp.text[:400]}") from e
+
+    @staticmethod
+    def _safe_content(data: dict) -> str:
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as e:
+            raise ValueError(f"API 200 response missing expected fields — "
+                             f"response dumped to log ({len(str(data))} bytes)") from e
+
     async def _chat_sync(self, messages: list[dict]) -> str:
         payload = {
             "model": self.model_name,
@@ -69,10 +84,12 @@ class OpenAICompatProvider(LLMProvider):
             if resp.status_code not in self._RETRYABLE_CODES or attempt == self._MAX_RETRIES - 1:
                 raise last_exc
             await asyncio.sleep(2 ** attempt + random.uniform(0, 0.5))
-        if last_exc is not None:
-            raise last_exc
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
+        else:
+            # Exhausted all retries — last_exc is guaranteed non-None
+            raise last_exc  # type: ignore[misc]
+        # resp is the successful response here
+        data = self._safe_json(resp)
+        content = self._safe_content(data)
         usage = data.get("usage", {})
         log_usage(
             provider=self.provider_name,
@@ -104,13 +121,22 @@ class OpenAICompatProvider(LLMProvider):
                     break
                 try:
                     chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                # DeepSeek (and others) return errors inside the stream body as
+                # {"error": {"message": "..."}} — surface these instead of silently
+                # dropping them, which produces an opaque "char 0" parse error later.
+                if "error" in chunk and isinstance(chunk["error"], dict):
+                    msg = chunk["error"].get("message", str(chunk["error"]))
+                    raise ValueError(f"API stream error: {msg}")
+                try:
                     delta = chunk["choices"][0].get("delta", {})
                     token = delta.get("content", "")
-                    if token:
-                        tokens_out += 1
-                        yield token
-                except (json.JSONDecodeError, KeyError, IndexError):
+                except (KeyError, IndexError):
                     continue
+                if token:
+                    tokens_out += 1
+                    yield token
 
         log_usage(
             provider=self.provider_name,

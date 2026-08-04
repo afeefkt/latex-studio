@@ -34,6 +34,15 @@
 
   <!-- Apply view — the job-search workflow. Default landing view. -->
   <div id="apply-view">
+    <div id="apply-progress">
+      <div class="ap-track"><div class="ap-fill" id="ap-fill"></div></div>
+      <div class="ap-nodes">
+        <div class="ap-node active" data-step="1"><span class="ap-dot"></span><span class="ap-label">Analyse</span></div>
+        <div class="ap-node" data-step="2"><span class="ap-dot"></span><span class="ap-label">Fit check</span></div>
+        <div class="ap-node" data-step="3"><span class="ap-dot"></span><span class="ap-label">Configure</span></div>
+        <div class="ap-node" data-step="4"><span class="ap-dot"></span><span class="ap-label">Ready</span></div>
+      </div>
+    </div>
     <div id="apply-container">
 
       <!-- STEP 1 — paste the job ad -->
@@ -162,6 +171,7 @@
   <div id="app-layout" class="hidden">
     <!-- Sidebar -->
     <aside id="sidebar">
+      <div id="sidebar-resize-handle"></div>
       <div id="sidebar-header">
         <span>Documents</span>
         <button id="btn-new-doc" title="New document from template">+ New</button>
@@ -169,10 +179,6 @@
       <nav id="doc-list">
         <div class="sidebar-empty">Loading…</div>
       </nav>
-      <div id="template-list-section">
-        <div class="doc-section-header">📋 Templates <span id="template-list-count" class="doc-section-count">0</span></div>
-        <div id="template-list"></div>
-      </div>
     </aside>
 
     <!-- Workspace -->
@@ -191,17 +197,20 @@
 
         <!-- Chat panel -->
         <div id="chat-panel">
-          <div id="chat-header">
-            <span class="chat-title">LaTeX help</span>
-            <select id="chat-provider">
-              <option value="deepseek">DeepSeek</option>
-              <option value="nvidia">NVIDIA</option>
-              <option value="ollama">Ollama</option>
-            </select>
-            <select id="chat-model">
-              <option value="">Auto</option>
-            </select>
-            <button id="btn-chat-clear" title="Clear chat">✕</button>
+          <div id="panel-tabs">
+            <button class="panel-tab active" data-panel="ai">AI Help</button>
+            <button class="panel-tab" data-panel="files">Files</button>
+            <div id="chat-controls">
+              <select id="chat-provider">
+                <option value="deepseek">DeepSeek</option>
+                <option value="nvidia">NVIDIA</option>
+                <option value="ollama">Ollama</option>
+              </select>
+              <select id="chat-model">
+                <option value="">Auto</option>
+              </select>
+              <button id="btn-chat-clear" title="Clear chat">✕</button>
+            </div>
           </div>
           <div id="chat-messages">
             <div class="chat-empty">Ask the AI to edit your LaTeX code.<br><small>e.g. "make section headers blue", "increase font size to 12pt"</small></div>
@@ -210,6 +219,16 @@
           <div id="chat-input-row">
             <textarea id="chat-input" placeholder="Ask about LaTeX formatting…" rows="1"></textarea>
             <button id="btn-chat-send">Send</button>
+          </div>
+          <div id="file-manager-panel" class="hidden">
+            <div id="fm-file-list"></div>
+            <div id="fm-actions">
+              <label class="btn-ghost fm-upload-label">↑ Upload image
+                <input type="file" id="fm-upload-input" accept="image/*,.pdf" hidden>
+              </label>
+              <button id="fm-import-template" class="btn-ghost">+ Import .tex template</button>
+            </div>
+            <div id="fm-status"></div>
           </div>
         </div>
       </div>

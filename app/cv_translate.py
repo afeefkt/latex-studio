@@ -49,22 +49,24 @@ def collect_cv_strings(cv_vars: dict) -> dict[str, str]:
     put("nationality", ident.get("nationality"))
     put("work_auth", ident.get("work_authorisation"))
 
-    # Both role views, same keys — whichever the template renders from, it matches.
-    for role in facts.get("roles") or []:
-        k = _rkey(role.get("org", ""), role.get("start", ""))
-        put(f"{k}.title", role.get("title"))
-        put(f"{k}.duration", role.get("duration"))
-        put(f"{k}.end", role.get("end"))
-        for b in role.get("bullets") or []:
-            if b.get("id"):
-                put(f"bullet.{b['id']}", b.get("text"))
-
+    # role_groups has the optimized text — run first so optimized bullets win.
+    # facts.roles fills any bullets absent from role_groups (roles with no
+    # selected bullets, or bullets not included in the tailoring).
     for rg in cv_vars.get("role_groups") or []:
         k = _rkey(rg.get("org", ""), rg.get("start", ""))
         put(f"{k}.title", rg.get("role_title"))
         put(f"{k}.duration", rg.get("duration"))
         put(f"{k}.end", rg.get("end"))
         for b in rg.get("bullets") or []:
+            if b.get("id"):
+                put(f"bullet.{b['id']}", b.get("text"))
+
+    for role in facts.get("roles") or []:
+        k = _rkey(role.get("org", ""), role.get("start", ""))
+        put(f"{k}.title", role.get("title"))
+        put(f"{k}.duration", role.get("duration"))
+        put(f"{k}.end", role.get("end"))
+        for b in role.get("bullets") or []:
             if b.get("id"):
                 put(f"bullet.{b['id']}", b.get("text"))
 
