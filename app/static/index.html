@@ -81,27 +81,6 @@
         <h2><span class="step-num">3</span> Generation options</h2>
         <div class="gen-options">
 
-          <!-- Channel choice (radios styled as cards) -->
-          <div class="gen-opt" id="opt-channel">
-            <label class="gen-opt-label">Channel</label>
-            <div class="gen-opt-cards">
-              <label class="radio-card" for="ch-portal">
-                <input type="radio" name="channel" id="ch-portal" value="portal" checked>
-                <div class="radio-card-body">
-                  <span class="radio-card-title">🏢 Company portal</span>
-                  <span class="radio-card-sub">ATS-safe single column. Use for Airbus, Liebherr, Lufthansa Technik and any careers-page upload.</span>
-                </div>
-              </label>
-              <label class="radio-card" for="ch-email">
-                <input type="radio" name="channel" id="ch-email" value="email">
-                <div class="radio-card-body">
-                  <span class="radio-card-title">✉️ Email or recruiter</span>
-                  <span class="radio-card-sub">Designed layout. Use when a human opens the file directly.</span>
-                </div>
-              </label>
-            </div>
-          </div>
-
           <!-- Documents checkboxes -->
           <div class="gen-opt" id="opt-documents">
             <label class="gen-opt-label">Documents</label>
@@ -142,12 +121,6 @@
             <select id="opt-language">
               <option value="en">English</option>
             </select>
-          </div>
-
-          <!-- Translate row (hidden until non-English selected) -->
-          <div class="gen-opt hidden" id="translate-row">
-            <button id="btn-translate" class="btn-primary">Translate</button>
-            <span id="translate-status"></span>
           </div>
 
         </div>
@@ -217,14 +190,14 @@
           </div>
           <div id="tailor-results" class="hidden"></div>
           <div id="chat-input-row">
-            <textarea id="chat-input" placeholder="Ask about LaTeX formatting…" rows="1"></textarea>
+            <textarea id="chat-input" placeholder="Edit document — formatting, content, fix errors…" rows="1"></textarea>
             <button id="btn-chat-send">Send</button>
           </div>
           <div id="file-manager-panel" class="hidden">
             <div id="fm-file-list"></div>
             <div id="fm-actions">
-              <label class="btn-ghost fm-upload-label">↑ Upload image
-                <input type="file" id="fm-upload-input" accept="image/*,.pdf" hidden>
+              <label class="btn-ghost fm-upload-label">↑ Upload file
+                <input type="file" id="fm-upload-input" accept="image/*,.pdf,.cls,.sty,.bst,.bib,.lua,.fd,.def,.lco" hidden>
               </label>
               <button id="fm-import-template" class="btn-ghost">+ Import .tex template</button>
             </div>

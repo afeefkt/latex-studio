@@ -267,6 +267,9 @@ async def compile_doc(doc_path: str) -> CompileResult:
             log=log_text, git_committed=committed,
         )
     else:
+        stale_pdf = src_dir / "out.pdf"
+        if stale_pdf.exists():
+            stale_pdf.unlink()
         return CompileResult(
             success=False, pdf_path=None, errors=errors, warnings=warnings, log=log_text,
         )

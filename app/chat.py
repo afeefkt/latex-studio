@@ -10,7 +10,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.compile import compile_doc
-from app.docs import read_file, write_file
+from app.content import yaml_dump_facts
+from app.docs import load_facts, read_file, write_file
 from app.llm.provider import get_provider, list_available_models, list_providers
 from app.paths import PROMPTS_DIR
 
@@ -104,6 +105,26 @@ class ApplyFixRequest(BaseModel):
 MAX_FIX_ITERATIONS = 3
 
 
+def _inject_facts(messages: list[dict]) -> list[dict]:
+    """Insert facts.yaml context into the message list so the LLM knows what's real."""
+    try:
+        facts = load_facts()
+    except Exception:
+        return messages
+    if not facts:
+        return messages
+    facts_block = yaml_dump_facts(facts)
+    messages.insert(2, {
+        "role": "user",
+        "content": f"Here is the candidate's facts.yaml (the ONLY source of truth for factual claims):\n\n```yaml\n{facts_block}\n```",
+    })
+    messages.insert(3, {
+        "role": "assistant",
+        "content": "I see the document and the fact bank. I will only use facts from facts.yaml for any content changes.",
+    })
+    return messages
+
+
 # ── SSE streaming endpoint ─────────────────────────────────────────────────────
 
 @router.post("/stream")
@@ -127,6 +148,7 @@ async def chat_stream(body: ChatRequest):
         })
 
     full_messages += messages
+    _inject_facts(full_messages)
 
     async def event_generator():
         llm = None
@@ -262,6 +284,7 @@ async def apply_and_fix(body: ApplyFixRequest):
         {"role": "assistant", "content": "I see the document. I'll help you edit it. What changes would you like?"},
         {"role": "user", "content": prompt},
     ]
+    _inject_facts(messages)
 
     original_content = current_content
 

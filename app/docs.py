@@ -702,16 +702,27 @@ def delete_document(doc_path: str) -> None:
 
 # ── Document file listing ─────────────────────────────────────────────────────
 
-def list_doc_files(doc_path: str) -> list[str]:
-    """List editable files in a document folder (tex, sty, cls, yaml). Excludes document.json."""
+def list_doc_files(doc_path: str) -> list[dict]:
+    """List files in a document folder (recursively) with relative path and size.
+    Excludes build artifacts, dotfiles, hidden directories, and document.json."""
     target = _safe_target(doc_path)
     if not target.exists():
         return []
-    editable_exts = {".tex", ".sty", ".cls", ".yaml"}
     files = []
-    for item in sorted(target.iterdir()):
-        if item.is_file() and item.suffix in editable_exts and item.name != "document.json":
-            files.append(item.name)
+    for item in sorted(target.rglob("*")):
+        if not item.is_file():
+            continue
+        rel = item.relative_to(target)
+        parts = rel.parts
+        # Skip if any path component is a dotfile/hidden dir or in skip names
+        if any(p.startswith(".") or p in _ASSET_SKIP_NAMES for p in parts):
+            continue
+        if item.suffix.lower() in _ASSET_SKIP_SUFFIXES:
+            continue
+        files.append({
+            "name": str(rel).replace("\\", "/"),
+            "size": item.stat().st_size,
+        })
     return files
 
 

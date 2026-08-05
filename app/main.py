@@ -114,10 +114,11 @@ async def upload_workspace_file(doc_path: str, file: UploadFile = FastFile(...))
         raise HTTPException(400, "No file selected")
     if "/" in file.filename or "\\" in file.filename or file.filename.startswith("."):
         raise HTTPException(400, "Invalid filename")
-    allowed = {".jpg", ".jpeg", ".png", ".gif", ".pdf", ".eps", ".svg"}
+    allowed = {".jpg", ".jpeg", ".png", ".gif", ".pdf", ".eps", ".svg",
+                ".cls", ".sty", ".bst", ".bib", ".lua", ".fd", ".def", ".lco"}
     suffix = Path(file.filename).suffix.lower()
     if suffix not in allowed:
-        raise HTTPException(400, f"Only image and PDF files can be uploaded (got {suffix})")
+        raise HTTPException(400, f"Unsupported file type: {suffix}")
     target = _safe_target(doc_path) / file.filename
     content = await file.read()
     target.write_bytes(content)
@@ -126,11 +127,15 @@ async def upload_workspace_file(doc_path: str, file: UploadFile = FastFile(...))
 
 @app.delete("/api/docs/{doc_path:path}/file/{filename:path}")
 async def delete_workspace_file(doc_path: str, filename: str):
-    if "/" in filename or "\\" in filename or filename.startswith("."):
+    # Allow forward slashes for subdir files (e.g. pics/photo.jpg) but block traversal
+    if "\\" in filename or filename.startswith(".") or ".." in filename.split("/"):
         raise HTTPException(400, "Invalid filename")
     if filename in ("main.tex", "main.tex.j2"):
         raise HTTPException(400, "Cannot delete main.tex — the document would become uncompileable")
-    target = _safe_target(doc_path) / filename
+    base = _safe_target(doc_path)
+    target = (base / filename).resolve()
+    if not str(target).startswith(str(base.resolve())):
+        raise HTTPException(400, "Invalid filename")
     if not target.exists():
         raise HTTPException(404, f"File '{filename}' not found")
     target.unlink()

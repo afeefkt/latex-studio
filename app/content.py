@@ -360,8 +360,12 @@ async def tailor_letter(body: TailorRequest):
             if json_match:
                 json_str = json_match.group(1).strip()
             else:
-                # Try bare JSON
-                json_str = full.strip()
+                # Try to find a JSON object {...} in the response
+                obj_match = re.search(r"\{[\s\S]*\}", full)
+                if obj_match:
+                    json_str = obj_match.group(0).strip()
+                else:
+                    json_str = full.strip()
 
             try:
                 parsed = json.loads(json_str)

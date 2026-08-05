@@ -1289,52 +1289,11 @@ kbd {
   min-width: 180px;
 }
 .gen-opt select:focus { outline: none; border-color: var(--accent); }
-.gen-opt-cards {
-  flex: 1;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
 .gen-opt-checks {
   display: flex;
   gap: 18px;
   padding-top: 7px;
 }
-
-/* Radio cards */
-.radio-card {
-  flex: 1 1 280px;
-  display: flex;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.radio-card:hover { border-color: var(--accent); }
-.radio-card input[type="radio"] {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.radio-card input[type="radio"]:checked + .radio-card-body {
-  border-color: var(--accent);
-}
-.radio-card-body {
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  border-radius: 10px;
-  border: 2px solid transparent;
-}
-.radio-card input[type="radio"]:checked + .radio-card-body {
-  border-color: var(--accent);
-}
-.radio-card-title { font-size: 14px; font-weight: 600; }
-.radio-card-sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
 
 /* Checkboxes */
 .checkbox-row {

@@ -92,9 +92,6 @@ const optLetterTemplate = $("opt-letter-template");
 const optLanguage    = $("opt-language");
 const docLetter      = $("doc-letter");
 const docCv          = $("doc-cv");
-const translateRow   = $("translate-row");
-const btnTranslate   = $("btn-translate");
-const translateStatus = $("translate-status");
 
 let chatHistory = [];
 let isStreaming = false;
@@ -416,7 +413,8 @@ async function switchDocument(path, kind) {
   try {
     const resp = await fetch(`/api/docs/${path}/files`);
     const data = await resp.json();
-    docFiles = data.files || [];
+    const rawFiles = data.files || [];
+    docFiles = rawFiles.map(f => typeof f === "string" ? f : f.name);
     if (!docFiles.includes("main.tex")) docFiles.unshift("main.tex");
   } catch {
     docFiles = ["main.tex"];
@@ -1216,24 +1214,10 @@ async function loadLanguages() {
 loadTemplates();
 loadLanguages();
 
-// Show/hide translate button when language changes
+// Clear cached translations when language changes so generate re-translates.
 optLanguage.addEventListener("change", () => {
-  if (optLanguage.value !== "en") {
-    translateRow.classList.remove("hidden");
-    // Clear prior translations when language changes — a German body and a
-    // German CV map are both wrong the moment the target becomes French.
-    if (tailorResultData) {
-      tailorResultData = { ...tailorResultData, _translated_body: null, _translated_cv: null };
-      translateStatus.textContent = "";
-    }
-  } else {
-    translateRow.classList.add("hidden");
-    translateStatus.textContent = "";
-    // Reverting to English: the translated body and CV map are now unused.
-    // Forgetting them here keeps generateDocs from shipping stale German text.
-    if (tailorResultData) {
-      tailorResultData = { ...tailorResultData, _translated_body: null, _translated_cv: null };
-    }
+  if (tailorResultData) {
+    tailorResultData = { ...tailorResultData, _translated_body: null, _translated_cv: null };
   }
 });
 
@@ -1249,8 +1233,6 @@ function resetApplyFlow() {
   fitReport.innerHTML = "";
   generateStatus.innerHTML = "";
   applyDownloads.innerHTML = "";
-  translateStatus.textContent = "";
-  translateRow.classList.add("hidden");
   optLanguage.value = "en";
   [applyStep2, applyStep3, applyStep4].forEach(s => s.classList.add("hidden"));
   setProgressStep(1);
@@ -1640,7 +1622,7 @@ async function generateDocs() {
         return;
       }
       tailorResultData = { ...tailorResultData, _translated_body: tData.translated };
-      translateStatus.innerHTML = '<span class="apply-ok">✓ Auto-translated</span>';
+      generateStatus.innerHTML = '<span class="apply-ok">✓ Letter auto-translated</span>';
     } catch (e) {
       generateStatus.innerHTML = `<span class="apply-err">Auto-translation failed: ${e.message}</span>`;
       btnGenerate.disabled = false;
@@ -1686,7 +1668,7 @@ async function generateDocs() {
       }
       tailorResultData = { ...tailorResultData, _translated_cv: cvTranslated };
       const n = Object.keys(cvTranslated).length;
-      translateStatus.innerHTML = `<span class="apply-ok">✓ Auto-translated (${n} CV fields)</span>`;
+      generateStatus.innerHTML = `<span class="apply-ok">✓ CV auto-translated (${n} fields)</span>`;
     } catch (e) {
       generateStatus.innerHTML = `<span class="apply-err">CV translation failed: ${e.message}</span>`;
       btnGenerate.disabled = false;
@@ -1699,7 +1681,6 @@ async function generateDocs() {
   generateStatus.innerHTML = '<span class="spinner"></span> Building documents, then compiling…';
 
   const d = tailorResultData;
-  const channel = document.querySelector('input[name="channel"]:checked')?.value || "portal";
   const wantLetter = docLetter.checked;
   const wantCv = docCv.checked;
   const documents = [];
@@ -1718,7 +1699,7 @@ async function generateDocs() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        channel,
+        channel: "portal",
         documents,
         language: optLanguage.value,
         cv_template: optCvTemplate.value || "",
@@ -1837,18 +1818,30 @@ async function loadFileManager() {
   try {
     const resp = await fetch(`/api/docs/${currentDoc.path}/files`);
     const data = await resp.json();
-    const files = (data.files || []).filter(f => f !== "document.json");
+    const files = (data.files || []).filter(f => {
+      const name = typeof f === "string" ? f : f.name;
+      return name !== "document.json";
+    });
     const fmRows = files.map(f => {
-      const ext = f.split(".").pop().toLowerCase();
-      const icons = { tex: "📝", sty: "🎨", cls: "📦", yaml: "📋", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", pdf: "📕", eps: "📐", svg: "🎨" };
-      const icon = icons[ext] || "📄";
+      const name = typeof f === "string" ? f : f.name;
+      const size = typeof f === "string" ? null : (f.size || 0);
+      const ext = name.split(".").pop().toLowerCase();
+      const icons = { tex: "📝", sty: "⚙️", cls: "⚙️", yaml: "📋", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", gif: "🖼️", pdf: "📄", eps: "📐", svg: "🎨" };
+      const icon = icons[ext] || "📦";
+      let sizeStr = "";
+      if (size !== null) {
+        if (size < 1024) sizeStr = "< 1 KB";
+        else if (size < 1048576) sizeStr = Math.round(size / 1024) + " KB";
+        else sizeStr = (size / 1048576).toFixed(1) + " MB";
+      }
       return `<div class="fm-row">
         <span class="fm-icon">${icon}</span>
-        <span class="fm-name">${escapeHTML(f)}</span>
-        <button class="fm-delete" data-fm-file="${escapeHTML(f)}" title="Delete">×</button>
+        <span class="fm-name">${escapeHTML(name)}</span>
+        ${sizeStr ? `<span class="fm-size">${sizeStr}</span>` : ""}
+        <button class="fm-delete" data-fm-file="${escapeHTML(name)}" title="Delete">×</button>
       </div>`;
     }).join("");
-    fmList.innerHTML = fmRows || '<div style="padding:8px 10px;color:var(--text-dim);font-size:11px">No editable files</div>';
+    fmList.innerHTML = fmRows || '<div style="padding:8px 10px;color:var(--text-dim);font-size:11px">No files</div>';
 
     fmList.querySelectorAll(".fm-delete").forEach(btn => {
       btn.addEventListener("click", (e) => {
@@ -1934,64 +1927,6 @@ document.getElementById("fm-import-template")?.addEventListener("click", () => {
   });
 })();
 
-// ── Translate button ─────────────────────────────────────────────────────────
-btnTranslate.addEventListener("click", async () => {
-  if (!tailorResultData) return;
-  if (!tailorResultData.assembled_body) {
-    translateStatus.innerHTML = '<span class="apply-err">No letter body to translate. Run the analysis first.</span>';
-    return;
-  }
-  const lang = optLanguage.value;
-  if (!lang || lang === "en") return;
-
-  // Include English hook so the full letter body is translated together
-  const hookText = tailorResultData.hook_text || "";
-  const bodyText = tailorResultData.assembled_body || "";
-  const text = hookText ? hookText + "\n\n" + bodyText : bodyText;
-
-  btnTranslate.disabled = true;
-  btnTranslate.textContent = "Translating…";
-  translateStatus.innerHTML = '<span class="spinner"></span> Translating…';
-
-  try {
-    const resp = await fetch("/api/content/translate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        language: lang,
-        provider: applyProvider.value || null,
-        model: applyModel.value || null,
-        job_ad_text: jdTextarea.value || "",
-      }),
-    });
-    if (!resp.ok) {
-      const msg = await resp.text();
-      throw new Error(msg || `HTTP ${resp.status}`);
-    }
-    const data = await resp.json();
-    if (data.errors && data.errors.length) {
-      translateStatus.innerHTML = `<span class="apply-err">Translation blocked: ${data.errors.map(e => e.message).join("; ")}</span>`;
-      if (data.translated) {
-        // Offer hand-fix: store translated text but show warnings
-        tailorResultData = { ...tailorResultData, _translated_body: data.translated };
-        translateStatus.innerHTML += `<br><small>Translated text stored for hand-editing. Re-check required.</small>`;
-      }
-      return;
-    }
-    if (data.warnings && data.warnings.length) {
-      translateStatus.innerHTML = `<span class="apply-warn">Warnings: ${data.warnings.map(w => w.message).join("; ")}</span>`;
-    } else {
-      translateStatus.innerHTML = '<span class="apply-ok">✓ Translated</span>';
-    }
-    tailorResultData = { ...tailorResultData, _translated_body: data.translated };
-  } catch (e) {
-    translateStatus.innerHTML = `<span class="apply-err">${e.message || "Translation failed"}</span>`;
-  } finally {
-    btnTranslate.disabled = false;
-    btnTranslate.textContent = "Translate";
-  }
-});
 
 // ── Chat: Send message ─────────────────────────────────────────────────────────
 

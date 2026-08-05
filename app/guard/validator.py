@@ -21,6 +21,7 @@ CERT_PATTERNS: list[re.Pattern] = [
         _cert_raw if isinstance(_cert_raw, list) else _cert_raw.get("en", [])
     )
 ]
+_LANG_CERT_ISSUERS: set[str] = set(_rules.get("language_cert_issuers", []))
 NUMBER_RE = re.compile(_rules.get("number_pattern", r"\d+"))
 ENTITY_RE = re.compile(_rules.get("entity_pattern", r"[A-Z][a-z]+(?:\s+[A-Z][a-zA-Z]+)+"))
 
@@ -349,6 +350,8 @@ def _rule_9_certifications(text: str, facts: FactBank, errors: list,
                 continue
             cert_name = " ".join(cert_name.split())
             if cert_name in all_certs:
+                continue
+            if cert_name in _LANG_CERT_ISSUERS:
                 continue
             matched = False
             for known in all_certs:
