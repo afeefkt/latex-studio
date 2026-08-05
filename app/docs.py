@@ -349,17 +349,27 @@ def _safe_target(doc_path: str) -> Path:
     return target
 
 
-def read_file(doc_path: str, filename: str = "main.tex") -> str:
+def _safe_file_path(doc_path: str, filename: str = "main.tex") -> Path:
+    """Resolve a document file path without allowing escapes from the document."""
     target = _safe_target(doc_path)
-    path = target / filename
+    clean = (filename or "main.tex").replace("\\", "/").strip("/")
+    if not clean or clean.startswith(".") or ".." in clean.split("/"):
+        raise PermissionError(f"Invalid document filename: '{filename}'")
+    path = (target / clean).resolve()
+    if not path.is_relative_to(target.resolve()):
+        raise PermissionError(f"Refusing to access outside the document: '{filename}'")
+    return path
+
+
+def read_file(doc_path: str, filename: str = "main.tex") -> str:
+    path = _safe_file_path(doc_path, filename)
     if not path.exists():
         raise FileNotFoundError(f"{path} not found")
     return path.read_text(encoding="utf-8")
 
 
 def write_file(doc_path: str, content: str, filename: str = "main.tex") -> None:
-    target = _safe_target(doc_path)
-    path = target / filename
+    path = _safe_file_path(doc_path, filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 

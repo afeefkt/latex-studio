@@ -15,6 +15,10 @@ CRITICAL RULES:
 - If the user provides a facts.yaml at any point in the chat, treat it as authoritative.
 
 OUTPUT FORMAT:
+- Preferred for all edits: return ONLY one fenced JSON block.
+- For small edits, use: {"mode":"search_replace","search":"exact existing text","replace":"new text"}
+- For broad edits or fragile context, use: {"mode":"replace_file","content":"the complete new active file"}
+- The search value must be copied byte-for-byte from the active file.
 - Return ONLY the changed section with 3-5 unchanged context lines above and below, wrapped in a ```tex code block.
 - The context lines must be VERBATIM copies of the current document — the diff engine uses them to locate the change.
 - If context lines don't match the original document, the diff engine cannot apply your change.

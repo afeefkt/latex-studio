@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from app.compile import compile_doc
 from app.content import yaml_dump_facts
-from app.docs import load_facts, read_file, write_file
+from app.docs import list_doc_files, load_facts, read_file, write_file
 from app.llm.provider import get_provider, list_available_models, list_providers
 from app.paths import PROMPTS_DIR
 
@@ -30,6 +30,18 @@ def _load_system_prompt() -> str:
         else:
             _system_prompt_cache = "You are a LaTeX code editor. Only edit formatting and structure."
     return _system_prompt_cache
+
+
+TEXT_CONTEXT_SUFFIXES = {
+    ".tex", ".cls", ".sty", ".bib", ".bst", ".lco", ".def", ".fd", ".lua", ".txt",
+}
+MAX_CONTEXT_FILE_CHARS = 12000
+MAX_CONTEXT_TOTAL_CHARS = 50000
+
+
+def _extract_fenced(text: str, lang: str) -> str | None:
+    match = re.search(rf"```{re.escape(lang)}\s*([\s\S]*?)```", text, re.IGNORECASE)
+    return match.group(1).strip() if match else None
 
 
 def _patch_snippet(original: str, snippet: str) -> str | None:
@@ -73,6 +85,112 @@ def _patch_snippet(original: str, snippet: str) -> str | None:
     # Replace the matching region
     result = orig_lines[:best_pos] + snippet_lines + orig_lines[best_pos + len(snippet_lines):]
     return "\n".join(result)
+
+
+def _workspace_context(doc_path: str, active_file: str) -> str:
+    """Build bounded context from files inside the selected document folder."""
+    try:
+        files = list_doc_files(doc_path)
+    except Exception as e:
+        return f"Could not list document files: {e}"
+
+    names = [f["name"] if isinstance(f, dict) else str(f) for f in files]
+    lines = [
+        f"Selected document folder: {doc_path}",
+        f"Active file: {active_file}",
+        "Files in this document folder:",
+        *[f"- {name}" for name in names],
+    ]
+
+    total = 0
+    for name in names:
+        suffix = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if name == active_file or suffix not in TEXT_CONTEXT_SUFFIXES:
+            continue
+        if total >= MAX_CONTEXT_TOTAL_CHARS:
+            break
+        try:
+            content = read_file(doc_path, name)
+        except Exception:
+            continue
+        if not content.strip():
+            continue
+        budget = min(MAX_CONTEXT_FILE_CHARS, MAX_CONTEXT_TOTAL_CHARS - total)
+        excerpt = content[:budget]
+        total += len(excerpt)
+        truncated = "\n... [truncated]" if len(content) > len(excerpt) else ""
+        lines.append(f"\n--- {name} ---\n{excerpt}{truncated}")
+
+    return "\n".join(lines)
+
+
+EDIT_RESPONSE_INSTRUCTIONS = """
+When changing the document, return exactly one fenced JSON block. Do not return prose.
+
+Preferred formats:
+```json
+{"mode":"search_replace","search":"exact existing text","replace":"new text"}
+```
+
+or, when the edit is broad or context matching may be fragile:
+```json
+{"mode":"replace_file","content":"the complete new content of the active file"}
+```
+
+Rules:
+- `search` must be copied byte-for-byte from the active file.
+- `replace_file` must contain the complete active file, not only a snippet.
+- Only edit the active file unless the user explicitly names another file.
+""".strip()
+
+
+def _apply_structured_edit(original: str, raw_response: str) -> tuple[str | None, str]:
+    """Apply JSON/search-replace/full-file edits, falling back to legacy tex snippets."""
+    json_block = _extract_fenced(raw_response, "json")
+    if json_block:
+        try:
+            payload = json.loads(json_block)
+        except json.JSONDecodeError as e:
+            return None, f"LLM returned invalid edit JSON: {e}"
+        mode = str(payload.get("mode", "")).strip()
+        if mode == "replace_file":
+            content = payload.get("content")
+            if isinstance(content, str) and content.strip():
+                return content, "replace_file"
+            return None, "replace_file edit did not include content"
+        if mode == "search_replace":
+            search = payload.get("search")
+            replace = payload.get("replace")
+            if not isinstance(search, str) or not search:
+                return None, "search_replace edit did not include search text"
+            if not isinstance(replace, str):
+                return None, "search_replace edit did not include replacement text"
+            count = original.count(search)
+            if count == 1:
+                return original.replace(search, replace, 1), "search_replace"
+            if count == 0:
+                return None, "Search text was not found in the active file"
+            return None, "Search text matched more than once; edit would be ambiguous"
+        return None, f"Unknown edit mode: {mode or '(missing)'}"
+
+    search_block = _extract_fenced(raw_response, "search")
+    replace_block = _extract_fenced(raw_response, "replace")
+    if search_block is not None and replace_block is not None:
+        count = original.count(search_block)
+        if count == 1:
+            return original.replace(search_block, replace_block, 1), "search_replace"
+        return None, "Search block was not found uniquely in the active file"
+
+    tex_block = _extract_fenced(raw_response, "tex")
+    if tex_block:
+        if "\\documentclass" in tex_block or "\\begin{document}" in tex_block:
+            return tex_block, "replace_file"
+        patched = _patch_snippet(original, tex_block)
+        if patched is not None:
+            return patched, "legacy_snippet"
+        return None, "Could not locate snippet in document. The context lines may not match."
+
+    return None, "No machine-applicable edit block found"
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
@@ -276,12 +394,19 @@ async def apply_and_fix(body: ApplyFixRequest):
         current_content = read_file(doc_path, filename)
     except FileNotFoundError:
         raise HTTPException(404, "Document not found")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
 
     system_prompt = _load_system_prompt()
+    document_context = _workspace_context(doc_path, filename)
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Here is the current LaTeX document:\n\n```tex\n{current_content}\n```"},
-        {"role": "assistant", "content": "I see the document. I'll help you edit it. What changes would you like?"},
+        {"role": "user", "content": (
+            f"{document_context}\n\n"
+            f"Active file content ({filename}):\n\n```tex\n{current_content}\n```\n\n"
+            f"{EDIT_RESPONSE_INSTRUCTIONS}"
+        )},
+        {"role": "assistant", "content": "I see the active file, its sibling files, and the edit contract. I will return a machine-applicable edit."},
         {"role": "user", "content": prompt},
     ]
     _inject_facts(messages)
@@ -326,24 +451,23 @@ async def apply_and_fix(body: ApplyFixRequest):
             logger.info(f"Iteration {iteration}: LLM returned {len(llm_response)} chars")
 
             # Extract tex code block — if absent, treat as conversational reply
-            tex_match = re.search(r"```tex\s*([\s\S]*?)```", llm_response)
-            if not tex_match:
+            has_edit_block = any(
+                re.search(rf"```{lang}\s*[\s\S]*?```", llm_response, re.IGNORECASE)
+                for lang in ("json", "search", "replace", "tex")
+            )
+            if not has_edit_block:
                 yield f"event: done\ndata: {json.dumps({'success': False, 'reply': llm_response, 'iterations': iteration})}\n\n"
                 return
 
-            snippet = tex_match.group(1).strip()
-
-            if "UNABLE_TO_FIX" in snippet:
+            if "UNABLE_TO_FIX" in llm_response:
                 yield f"event: error\ndata: {json.dumps({'error': 'LLM was unable to fix the errors'})}\n\n"
                 return
 
-            logger.info(f"Iteration {iteration}: snippet is {len(snippet)} chars")
-
-            # Patch snippet into document
-            patched = _patch_snippet(current_content, snippet)
+            patched, apply_mode = _apply_structured_edit(current_content, llm_response)
             if patched is None:
-                yield f"event: error\ndata: {json.dumps({'error': 'Could not locate snippet in document. The context lines may not match.'})}\n\n"
+                yield f"event: error\ndata: {json.dumps({'error': apply_mode})}\n\n"
                 return
+            logger.info(f"Iteration {iteration}: applied edit mode={apply_mode}, chars={len(patched)}")
 
             current_content = patched
 
@@ -391,7 +515,11 @@ async def apply_and_fix(body: ApplyFixRequest):
             logger.info(f"Iteration {iteration}: compilation failed — {len(compile_errors)} errors")
 
             messages.append({"role": "assistant", "content": llm_response})
-            messages.append({"role": "user", "content": f"Compilation failed with errors:\n\n{error_text}\n\n{FIX_SYSTEM_PROMPT}"})
+            messages.append({"role": "user", "content": (
+                f"Compilation failed with errors:\n\n{error_text}\n\n"
+                f"Current active file content ({filename}):\n\n```tex\n{current_content}\n```\n\n"
+                f"{EDIT_RESPONSE_INSTRUCTIONS}\n\n{FIX_SYSTEM_PROMPT}"
+            )})
 
         # Max iterations reached
         yield f"event: done\ndata: {json.dumps({'success': False, 'iterations': MAX_FIX_ITERATIONS, 'message': f'Could not fix after {MAX_FIX_ITERATIONS} iterations', 'patched': current_content})}\n\n"
