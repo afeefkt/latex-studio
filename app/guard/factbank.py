@@ -7,7 +7,26 @@ import yaml
 
 from app.guard.models import FactBank
 from app.paths import WORKSPACE
+
+# Fallback only. The real path is resolved per-call by _facts_path() so that the
+# fact bank always follows the active profile — see the note there.
 DEFAULT_FACTS_PATH = WORKSPACE / "facts.yaml"
+
+
+def _facts_path() -> Path:
+    """Resolve the facts.yaml the *active profile* uses.
+
+    docs.FACTS_PATH is rebound by set_active_profile(); this module is imported
+    once, so a module-level constant would freeze the pre-profile path. The guard
+    would then validate fact_ids against a different facts.yaml than the one the
+    letter is assembled from — IDs pass rule 2, then resolve to no bullet text.
+    Read the attribute at call time so both always agree.
+    """
+    try:
+        import app.docs as _docs
+        return _docs.FACTS_PATH
+    except Exception:
+        return DEFAULT_FACTS_PATH
 
 
 def _extract_fact_ids(raw: dict) -> set[str]:
@@ -117,7 +136,7 @@ def _extract_certifications(raw: dict) -> tuple[list[str], list[dict]]:
 
 
 def load_factbank(path: Path | None = None) -> FactBank:
-    p = path or DEFAULT_FACTS_PATH
+    p = path or _facts_path()
     if not p.exists():
         return FactBank(raw={})
 

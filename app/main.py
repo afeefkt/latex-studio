@@ -237,6 +237,15 @@ class RawFactsBody(BaseModel):
     yaml_text: str
 
 
+# Any real facts.yaml has at least one of these. A payload with none of them is
+# not facts — most likely an API error body echoed back by a client that didn't
+# check response.ok. Writing it would destroy the fact bank.
+_FACTS_KEYS = {
+    "identity", "roles", "skills", "education", "languages", "awards",
+    "hobbies", "banned_claims", "certifications_held", "certifications_in_progress",
+}
+
+
 @app.post("/api/facts/raw")
 async def update_facts_raw(body: RawFactsBody):
     """Accept raw YAML, validate, and save facts.yaml."""
@@ -247,6 +256,13 @@ async def update_facts_raw(body: RawFactsBody):
             raise ValueError("facts.yaml must be a YAML dictionary")
     except Exception as e:
         raise HTTPException(400, f"Invalid YAML: {e}")
+    if not _FACTS_KEYS & data.keys():
+        raise HTTPException(
+            400,
+            "Refusing to save: no recognised facts.yaml sections found "
+            f"(expected at least one of {', '.join(sorted(_FACTS_KEYS))}). "
+            "This usually means an error response was pasted into the editor.",
+        )
     save_facts(data)
     return {"saved": True}
 

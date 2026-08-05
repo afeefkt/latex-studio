@@ -374,7 +374,9 @@ async def tailor_letter(body: TailorRequest):
             # Extract TailorResponse fields from parsed JSON
             tailor_data = {
                 "matched_requirements": parsed.get("matched_requirements", []),
-                "selected_bullet_ids": parsed.get("selected_bullet_ids", []),
+                "selected_bullet_ids": _expand_role_ids_to_bullets(
+                    facts, parsed.get("selected_bullet_ids", [])
+                ),
                 "focus_phrase": parsed.get("focus_phrase", ""),
                 "hook_key": parsed.get("hook_key", ""),
                 "unmatched_requirements": parsed.get("unmatched_requirements", []),
@@ -1018,6 +1020,41 @@ def _language_rows(facts: dict) -> list[dict]:
             "flag": code if code in flags else "",
         })
     return rows
+
+
+def _expand_role_ids_to_bullets(facts: dict, ids: list[str]) -> list[str]:
+    """
+    Expand any role-level IDs in `ids` to their constituent bullet IDs.
+    Proper bullet IDs pass through unchanged. Unknown IDs are silently dropped.
+
+    The LLM sometimes returns a role `id` (e.g. 'koosys') instead of individual
+    bullet IDs (e.g. 'koosys_foc'). Both appear in facts.yaml so they pass Rule 2,
+    but _get_bullet_texts only resolves bullet-level IDs — leading to an empty
+    letter body. Expanding here fixes that at the source, before any validation.
+    """
+    all_bullet_ids: set[str] = set()
+    role_to_bullets: dict[str, list[str]] = {}
+
+    for role in facts.get("roles", []):
+        role_id = role.get("id", "")
+        bids = [b["id"] for b in role.get("bullets", []) if b.get("id")]
+        if role_id:
+            role_to_bullets[role_id] = bids
+        all_bullet_ids.update(bids)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for fid in ids:
+        if fid in all_bullet_ids:
+            if fid not in seen:
+                result.append(fid)
+                seen.add(fid)
+        elif fid in role_to_bullets:
+            for bid in role_to_bullets[fid]:
+                if bid not in seen:
+                    result.append(bid)
+                    seen.add(bid)
+    return result
 
 
 def _get_bullet_texts(facts: dict, bullet_ids: list[str]) -> list[dict]:

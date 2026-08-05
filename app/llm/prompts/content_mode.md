@@ -41,7 +41,8 @@ CRITICAL RULES:
 1. Every fact_id MUST exist exactly as provided in facts.yaml. Double-check before output.
 2. focus_phrase MUST be a verbatim substring from the job ad text — copy-paste it.
 3. hook_key MUST be one of: rare_combination, domain_transfer, exact_match, adjacent_expertise, self_taught.
-4. selected_bullet_ids should be 3-5 bullet IDs that best demonstrate fit for this role.
+4. selected_bullet_ids should be 3-5 BULLET-level IDs (e.g. "koosys_foc", not the role ID "koosys").
+   Bullet IDs appear inside each role's `bullets:` list. Role IDs (e.g. "koosys", "valentum") are NOT valid here.
 5. optimized_bullets: If a bullet text is vague, rewrite it to be more specific to this JD.
    Example: "Built plant models" → "Built 6-phase IPMSM plant models for motor control validation"
    You may ADD specific context from the same role (tools, domain) but NEVER invent new claims.

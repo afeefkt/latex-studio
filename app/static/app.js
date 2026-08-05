@@ -16,6 +16,7 @@ GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.mjs`;
 let currentDoc   = null;          // { path, name, kind }
 let currentFile  = "main.tex";    // active file in editor
 let docFiles     = [];            // files available in current doc
+let factsLoadFailed = false;      // true if facts.yaml failed to load — blocks save
 let pdfDoc       = null;
 let currentPage  = 1;
 let zoomScale    = 1.2;
@@ -376,10 +377,18 @@ async function switchDocument(path, kind) {
 
     try {
       const resp = await fetch("/api/facts/raw");
-      const text = await resp.text();
-      setEditorContent(text);
+      if (!resp.ok) {
+        // Never put an error body in the buffer: saving would write it back as
+        // facts.yaml, and a JSON error payload parses as valid YAML.
+        factsLoadFailed = true;
+        setEditorContent(`# Could not load facts.yaml (HTTP ${resp.status}).\n# Saving is disabled until it loads. Fix the file on disk, then reopen.`);
+      } else {
+        factsLoadFailed = false;
+        setEditorContent(await resp.text());
+      }
     } catch (e) {
-      setEditorContent("# Could not load facts.yaml");
+      factsLoadFailed = true;
+      setEditorContent("# Could not load facts.yaml. Saving is disabled until it loads.");
     }
 
     docList.querySelectorAll(".doc-item").forEach(el => {
@@ -474,11 +483,24 @@ async function saveCurrentFile() {
   const content = getEditorContent();
   try {
     if (currentDoc.path === "facts") {
-      await fetch("/api/facts/raw", {
+      // The buffer holds a load-failure placeholder, not facts. Saving would
+      // overwrite the real facts.yaml with it.
+      if (factsLoadFailed) {
+        showErrors([{ file: "facts.yaml", line: null, kind: "error",
+          message: "facts.yaml never loaded — save blocked to avoid overwriting it." }]);
+        return;
+      }
+      const resp = await fetch("/api/facts/raw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ yaml_text: content }),
       });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try { msg = (await resp.json()).detail || msg; } catch {}
+        showErrors([{ file: "facts.yaml", line: null, kind: "error",
+          message: `Facts not saved: ${msg}` }]);
+      }
     } else {
       await fetch(`/api/docs/${currentDoc.path}`, {
         method: "POST",
