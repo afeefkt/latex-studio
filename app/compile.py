@@ -258,7 +258,11 @@ async def compile_doc(doc_path: str) -> CompileResult:
     errors, warnings = _parse_log(log_text)
     pdf_candidate = out_dir / "main.pdf"
 
-    if pdf_candidate.exists():
+    # LuaLaTeX can write a partial main.pdf before hitting a fatal error.
+    # Check the log for the definitive failure marker so we don't serve a corrupt PDF.
+    fatal = "Fatal error occurred, no output PDF file produced" in log_text
+
+    if pdf_candidate.exists() and not fatal:
         stable_pdf = src_dir / "out.pdf"
         shutil.copy2(pdf_candidate, stable_pdf)
         committed = await asyncio.to_thread(_git_commit, src_dir, doc_path)
