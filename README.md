@@ -10,7 +10,7 @@ A self-hosted, browser-based LaTeX editor for CV and cover letter production, wi
 2. **Fit score** — STRONG / STRETCH / SKIP with a plain-English reason and hard-gap detection (certification, education, language)
 3. **Editable letter preview** — assembled body appears in a textarea; your edits pass through the anti-hallucination guard before generating
 4. **Choose a channel** — *Company portal* (ATS-safe single column) or *Email / recruiter* (designed two-column), each with its own template picker
-5. **One-click compile** → named PDF downloads (`Afeef_KT_CV_Vibracoustic.pdf`) and an entry logged to the application tracker
+5. **One-click compile** → named PDF downloads (`Afeef_Kallanthodan_CV_Vibracoustic.pdf`) and an entry logged to the application tracker
 6. **Local profiles** — separate `workspace/<profile>/` directories for different CV personas (aerospace vs. embedded, etc.)
 7. **AI template mapping** — paste any `.tex` template found online; the AI writes the Jinja adapter that renders from your fact bank
 

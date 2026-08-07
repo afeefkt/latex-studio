@@ -13,7 +13,7 @@ from app.cv_translate import apply_cv_strings, collect_cv_strings
 def _vars() -> dict:
     facts = {
         "identity": {
-            "name": "Afeef KT",
+            "name": "Afeef Kallanthodan",
             "email": "a@b.com",
             "title": "Embedded Software Engineer",
             "about": "Engineer with 8+ years across AUTOSAR and ISO 26262.",
@@ -232,7 +232,7 @@ def test_untouched_fields_survive():
     assert koosys["org"] == "KooSys GmbH"
     assert koosys["location"] == "Regensburg"
     assert koosys["tools"] == ["MATLAB/Simulink", "CANoe"]
-    assert out["facts"]["identity"]["name"] == "Afeef KT"
+    assert out["facts"]["identity"]["name"] == "Afeef Kallanthodan"
     assert out["facts"]["identity"]["email"] == "a@b.com"
     assert out["facts"]["education"][0]["institution"] == "Mahatma Gandhi University"
     assert out["facts"]["awards"][0]["org"] == "TATA Elxsi Ltd."
