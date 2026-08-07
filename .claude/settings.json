@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:/AI_Learnigns/LatexCoverLetter/.venv/Scripts/graphify.EXE hook-guard search"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "D:/AI_Learnigns/LatexCoverLetter/.venv/Scripts/graphify.EXE hook-guard read"
+          }
+        ]
+      }
+    ]
+  }
+}
