@@ -1129,19 +1129,33 @@ loadLanguages();
 
 // ── API Key management ────────────────────────────────────────────────────────
 const _APIKEY_PROVIDERS = [
-  { id: "deepseek",   label: "DeepSeek",    placeholder: "sk-...",            link: "https://platform.deepseek.com",     pw: true },
-  { id: "nvidia",     label: "NVIDIA",      placeholder: "nvapi-...",         link: "https://build.nvidia.com",          pw: true },
-  { id: "openrouter", label: "OpenRouter",  placeholder: "sk-or-...",         link: "https://openrouter.ai/keys",        pw: true },
-  { id: "ollama_url", label: "Ollama URL",  placeholder: "http://localhost:11434/v1", link: "", pw: false },
+  { id: "deepseek",   label: "DeepSeek",    placeholder: "sk-...",            link: "https://platform.deepseek.com",     pw: true,  env: "DEEPSEEK_API_KEY" },
+  { id: "nvidia",     label: "NVIDIA",      placeholder: "nvapi-...",         link: "https://build.nvidia.com",          pw: true,  env: "NVIDIA_API_KEY" },
+  { id: "openrouter", label: "OpenRouter",  placeholder: "sk-or-...",         link: "https://openrouter.ai/keys",        pw: true,  env: "OPENROUTER_API_KEY" },
+  { id: "ollama_url", label: "Ollama URL",  placeholder: "http://localhost:11434  (or paste /v1 URL)", link: "", pw: false, env: "OLLAMA_BASE_URL" },
 ];
+
+let _apiKeyStatus = {}; // { deepseek: true, nvidia: false, ... }
+
+async function _loadApiKeyStatus() {
+  try {
+    const data = await fetchJSON("/api/chat/providers");
+    for (const p of data.providers || []) {
+      _apiKeyStatus[p.id] = !!p.available;
+    }
+  } catch (_) {}
+}
 
 function _renderApiKeyPanel() {
   let html = "";
   for (const p of _APIKEY_PROVIDERS) {
+    const hasKey = !!_apiKeyStatus[p.id];
+    const dot = hasKey ? `<span class="apikey-dot apikey-dot-set"></span>` : `<span class="apikey-dot"></span>`;
     const linkHtml = p.link ? `<a href="${p.link}" target="_blank" class="apikey-link">get key ↗</a>` : "";
-    html += `<div class="apikey-row" data-provider="${p.id}">
-      <label>${p.label} ${linkHtml}</label>
-      <input type="${p.pw ? 'password' : 'text'}" class="apikey-input" placeholder="${p.placeholder}" autocomplete="off">
+    const placeholder = hasKey ? "•••••••• (set)" : p.placeholder;
+    html += `<div class="apikey-row${hasKey ? ' has-key' : ''}" data-provider="${p.id}">
+      <label>${dot}${p.label} ${linkHtml}</label>
+      <input type="${p.pw ? 'password' : 'text'}" class="apikey-input" placeholder="${placeholder}" autocomplete="off">
       <button class="apikey-save btn-ghost">Save</button>
     </div>`;
   }
@@ -1167,6 +1181,9 @@ function _renderApiKeyPanel() {
         if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
         btn.classList.add("saved");
         btn.textContent = "Saved ✓";
+        // Refresh status so the green dot appears immediately
+        await _loadApiKeyStatus();
+        _renderApiKeyPanel();
         setTimeout(() => { btn.classList.remove("saved"); btn.textContent = "Save"; }, 2000);
       } catch (e) {
         btn.textContent = "Error";
@@ -1175,7 +1192,11 @@ function _renderApiKeyPanel() {
     });
   });
 }
-_renderApiKeyPanel();
+
+(async function initApiKeys() {
+  await _loadApiKeyStatus();
+  _renderApiKeyPanel();
+})();
 
 // ── Settings Modal ────────────────────────────────────────────────────────────
 const settingsOverlay = $("settings-overlay");
@@ -1210,7 +1231,8 @@ function openSettingsModal() {
       if (cur && [...settingsModel.options].some(o => o.value === cur)) settingsModel.value = cur;
     }
   });
-  _renderSettingsApiKeys();
+  // Reload status then render so dots are fresh each time modal opens
+  _loadApiKeyStatus().then(_renderSettingsApiKeys);
   settingsOverlay.classList.remove("hidden");
   document.body.style.overflow = "hidden";
 }
@@ -1220,20 +1242,32 @@ function closeSettingsModal() {
   document.body.style.overflow = "";
 }
 
+// Map UI provider IDs to backend provider names for testing
+const _PROV_TEST_MAP = { deepseek: "deepseek", nvidia: "nvidia", openrouter: "openrouter", ollama_url: "ollama" };
+
 function _renderSettingsApiKeys() {
   const panel = $("settings-apikey-panel");
   if (!panel) return;
   let html = "";
   for (const p of _APIKEY_PROVIDERS) {
+    const hasKey = !!_apiKeyStatus[p.id];
+    const dot = hasKey
+      ? `<span class="apikey-dot apikey-dot-set" title="Key is set"></span>`
+      : `<span class="apikey-dot" title="No key set"></span>`;
     const linkHtml = p.link ? `<a href="${p.link}" target="_blank" class="apikey-link">get key ↗</a>` : "";
-    html += `<div class="apikey-row" data-provider="${p.id}">
-      <label class="settings-label">${p.label} ${linkHtml}</label>
-      <input type="${p.pw ? 'password' : 'text'}" class="apikey-input" placeholder="${p.placeholder}" autocomplete="off">
+    const placeholder = hasKey ? "•••••••• (key saved — paste new to replace)" : p.placeholder;
+    const testProv = _PROV_TEST_MAP[p.id] || p.id;
+    html += `<div class="apikey-row${hasKey ? ' has-key' : ''}" data-provider="${p.id}">
+      <label class="settings-label">${dot}${p.label} ${linkHtml}</label>
+      <input type="${p.pw ? 'password' : 'text'}" class="apikey-input" placeholder="${placeholder}" autocomplete="off">
       <button class="apikey-save btn-ghost">Save</button>
+      <button class="apikey-test btn-ghost" data-provtest="${testProv}">Test</button>
       <span class="apikey-status"></span>
     </div>`;
   }
   panel.innerHTML = html;
+
+  // Wire Save buttons
   panel.querySelectorAll(".apikey-save").forEach(btn => {
     btn.addEventListener("click", async () => {
       const row = btn.closest(".apikey-row");
@@ -1241,7 +1275,7 @@ function _renderSettingsApiKeys() {
       const status = row.querySelector(".apikey-status");
       const provider = row.dataset.provider;
       const value = input.value.trim();
-      if (!value) { status.textContent = "Enter a value first"; return; }
+      if (!value) { status.textContent = "Enter a value first"; status.style.color = "var(--warn)"; return; }
       btn.textContent = "…";
       try {
         const resp = await fetch("/api/settings/apikey", {
@@ -1252,9 +1286,10 @@ function _renderSettingsApiKeys() {
         if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
         btn.textContent = "Save";
         status.textContent = "Saved ✓";
-        status.style.color = "var(--accent)";
-        setTimeout(() => { status.textContent = ""; }, 2500);
+        status.style.color = "var(--ok)";
         input.value = "";
+        await _loadApiKeyStatus();
+        _renderSettingsApiKeys();
       } catch (e) {
         btn.textContent = "Save";
         status.textContent = "Error: " + e.message;
@@ -1262,7 +1297,44 @@ function _renderSettingsApiKeys() {
       }
     });
   });
+
+  // Wire Test buttons
+  panel.querySelectorAll(".apikey-test").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = btn.closest(".apikey-row");
+      const status = row.querySelector(".apikey-status");
+      const prov = btn.dataset.provtest;
+      status.textContent = "Testing…";
+      status.style.color = "var(--text-dim)";
+      btn.disabled = true;
+      try {
+        const resp = await fetch("/api/settings/test-provider", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: prov }),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          status.textContent = `✓ ${data.model} — ${data.latency_ms}ms`;
+          status.style.color = "var(--ok)";
+        } else {
+          status.textContent = `✗ ${data.error}`;
+          status.style.color = "var(--error)";
+        }
+      } catch (e) {
+        status.textContent = "Network error";
+        status.style.color = "var(--error)";
+      }
+      btn.disabled = false;
+    });
+  });
 }
+
+// Test All button — clicks every Test button in parallel
+$("settings-test-all")?.addEventListener("click", () => {
+  const panel = $("settings-apikey-panel");
+  if (panel) panel.querySelectorAll(".apikey-test").forEach(btn => btn.click());
+});
 
 settingsProvider?.addEventListener("change", _loadSettingsModels);
 

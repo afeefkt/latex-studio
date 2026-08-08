@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import app.compile  # noqa: F401 -- triggers MiKTeX PATH patch on import
@@ -116,6 +117,39 @@ async def save_apikey(body: ApiKeyBody):
         os.environ.pop(env_key, None)
     load_dotenv(env_path, override=True)
     return {"ok": True}
+
+
+# ── Test provider connectivity ─────────────────────────────────────────────────
+
+class TestProviderBody(BaseModel):
+    provider: str
+
+_TEST_MODELS = {
+    "deepseek":   "deepseek-chat",
+    "nvidia":     "meta/llama-3.2-3b-instruct",
+    "openrouter": "meta-llama/llama-3.2-3b-instruct:free",
+    "ollama":     None,
+}
+
+@app.post("/api/settings/test-provider")
+async def test_provider(body: TestProviderBody):
+    from app.llm.provider import get_provider
+    provider_name = body.provider.strip().lower()
+    if provider_name not in _TEST_MODELS:
+        return {"ok": False, "error": f"Unknown provider: {provider_name}"}
+    model = _TEST_MODELS[provider_name]
+    try:
+        t0 = time.perf_counter()
+        prov = get_provider(provider_name, model)
+        result = await prov.chat(
+            [{"role": "user", "content": "Hi"}],
+            stream=False,
+        )
+        ms = int((time.perf_counter() - t0) * 1000)
+        await prov.close()
+        return {"ok": True, "model": prov.model_name, "latency_ms": ms, "reply": result[:80]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
 
 
 # ── Document list ─────────────────────────────────────────────────────────────

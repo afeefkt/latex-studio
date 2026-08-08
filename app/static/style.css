@@ -1594,3 +1594,23 @@ kbd {
 }
 .apikey-save:hover { color: var(--text); border-color: var(--accent); }
 .apikey-save.saved { color: var(--ok); border-color: var(--ok); }
+.apikey-test {
+  font-size: 10px;
+  padding: 4px 8px;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: transparent;
+  flex: none;
+}
+.apikey-test:hover { background: rgba(137,180,250,0.1); }
+.apikey-test:disabled { opacity: 0.5; cursor: wait; }
+.apikey-row.has-key { border-left: 2px solid var(--ok); padding-left: 6px; border-radius: 0 4px 4px 0; }
+.apikey-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  margin-right: 3px;
+  vertical-align: middle;
+}
+.apikey-dot-set { background: var(--ok); }

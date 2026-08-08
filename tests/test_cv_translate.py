@@ -119,7 +119,7 @@ def test_proper_nouns_are_never_collected():
     to a translator — they are the fact bank's identity anchors."""
     values = set(collect_cv_strings(_vars()).values())
     for proper_noun in (
-        "Afeef KT", "a@b.com", "KooSys GmbH", "TATA Elxsi Ltd.",
+        "Afeef Kallanthodan", "a@b.com", "KooSys GmbH", "TATA Elxsi Ltd.",
         "Mahatma Gandhi University", "Regensburg", "Bangalore",
         "MATLAB/Simulink", "CANoe", "Polyspace",
     ):

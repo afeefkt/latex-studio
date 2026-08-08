@@ -570,12 +570,15 @@ def _create_unique(base_name: str, template_id: str, variables: dict,
     raise HTTPException(500, f"Could not find a free document name for '{base_name}'")
 
 
-def _pdf_filename(person: str, kind: str, company: str) -> str:
-    """Afeef_KT_CV_Vibracoustic.pdf — what a recruiter should see in their inbox."""
+def _pdf_filename(person: str, kind: str, company: str, role: str) -> str:
+    """Afeef_Kallanthodan_CoverLetter_Bertrandt_Group__Senior_Embedded_Engineer_2026-08-07.pdf"""
     def clean(s: str) -> str:
         return re.sub(r"[^A-Za-z0-9]+", "_", (s or "").strip()).strip("_")
-    parts = [clean(person) or "CV", kind, clean(company)]
-    return "_".join(p for p in parts if p) + ".pdf"
+    from datetime import datetime
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    prefix = "_".join(p for p in [clean(person) or "Candidate", kind, clean(company)] if p)
+    suffix = "_".join(p for p in [clean(role), date_str] if p)
+    return f"{prefix}__{suffix}.pdf"
 
 
 @router.post("/generate")
@@ -690,11 +693,7 @@ async def generate_documents(body: GenerateRequest):
                 "errors": [{"line": e.line, "message": e.message} for e in r.errors[:5]],
                 "doc_path": info["path"],
                 "url": f"/api/pdf/{info['path']}",
-                "filename": _pdf_filename(
-                    person,
-                    "CoverLetter" if kind == "letter" else "CV",
-                    company,
-                ),
+                "filename": _pdf_filename(person, "CoverLetter" if kind == "letter" else "CV", company, role),
             }
         except Exception as e:
             logger.error(f"Compile failed for {info['path']}: {e}")
@@ -703,11 +702,7 @@ async def generate_documents(body: GenerateRequest):
                 "errors": [{"line": None, "message": str(e)}],
                 "doc_path": info["path"],
                 "url": f"/api/pdf/{info['path']}",
-                "filename": _pdf_filename(
-                    person,
-                    "CoverLetter" if kind == "letter" else "CV",
-                    company,
-                ),
+                "filename": _pdf_filename(person, "CoverLetter" if kind == "letter" else "CV", company, role),
             }
 
     # ── Log the application ──
