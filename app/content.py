@@ -655,7 +655,7 @@ async def generate_documents(body: GenerateRequest):
 
     if want_cv:
         ats = body.channel != "email"
-        ct = body.cv_template or ("ats-cv" if ats else "optimized-cv")
+        ct = body.cv_template or ("ats-cv" if ats else "designed-cv")
         _resolve_template(ct, "cv")
         cv_vars = _cv_vars(
             facts=facts, bullet_ids=body.selected_bullet_ids,
@@ -721,7 +721,7 @@ async def generate_documents(body: GenerateRequest):
         unmatched_list="; ".join(body.unmatched),
         notes=body.notes,
         language=language,
-        cv_template=body.cv_template or ("ats-cv" if body.channel != "email" else "optimized-cv"),
+        cv_template=body.cv_template or ("ats-cv" if body.channel != "email" else "designed-cv"),
         letter_template=body.letter_template or "scrlttr2-letter",
     )
 
@@ -1240,13 +1240,13 @@ async def optimize_cv(body: OptimizeCvRequest):
     }
 
     # Create document (handles template rendering internally)
-    slug = "optimized-cv"
+    slug = "custom-cv"
     for attempt in range(1, 100):
         try:
-            doc_info = create_document(slug, "optimized-cv", template_vars)
+            doc_info = create_document(slug, "ats-cv", template_vars)
             break
         except FileExistsError:
-            slug = f"optimized-cv-{attempt}"
+            slug = f"custom-cv-{attempt}"
     else:
         raise HTTPException(500, "Could not create document")
 

@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -5,8 +7,9 @@ import app.compile  # noqa: F401 -- triggers MiKTeX PATH patch on import
 import app.docs as docs
 from app.chat import router as chat_router
 from app.content import router as content_router
-from app.paths import STATIC_DIR
+from app.paths import DATA_ROOT, STATIC_DIR
 from app.tracker import list_applications as tracker_list, update_application as tracker_update
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -61,6 +64,58 @@ async def health():
     except FileNotFoundError:
         version = "NOT INSTALLED -- run: winget install MiKTeX.MiKTeX"
     return {"status": "ok", "lualatex": version}
+
+
+# ── API key management ────────────────────────────────────────────────────────
+
+_ENV_KEY_MAP = {
+    "deepseek":     "DEEPSEEK_API_KEY",
+    "nvidia":       "NVIDIA_API_KEY",
+    "openrouter":   "OPENROUTER_API_KEY",
+    "ollama_url":   "OLLAMA_BASE_URL",
+    "ollama_model": "OLLAMA_MODEL",
+}
+
+
+def _update_env_file(path: Path, key: str, value: str) -> None:
+    """Set or replace a KEY=VALUE line in an .env file."""
+    if not path.exists():
+        path.write_text(f"{key}={value}\n", encoding="utf-8")
+        return
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    found = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(f"{key}=") or stripped.startswith(f"# {key}="):
+            if value:
+                lines[i] = f"{key}={value}\n"
+            else:
+                lines[i] = f"# {key}=\n"
+            found = True
+            break
+    if not found and value:
+        lines.append(f"{key}={value}\n")
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+class ApiKeyBody(BaseModel):
+    provider: str
+    value: str = ""
+
+
+@app.post("/api/settings/apikey")
+async def save_apikey(body: ApiKeyBody):
+    if body.provider not in _ENV_KEY_MAP:
+        raise HTTPException(400, f"Unknown provider: {body.provider}")
+    env_key = _ENV_KEY_MAP[body.provider]
+    env_path = DATA_ROOT / ".env"
+    _update_env_file(env_path, env_key, body.value.strip())
+    if body.value.strip():
+        os.environ[env_key] = body.value.strip()
+    else:
+        os.environ.pop(env_key, None)
+    load_dotenv(env_path, override=True)
+    return {"ok": True}
 
 
 # ── Document list ─────────────────────────────────────────────────────────────
@@ -140,6 +195,77 @@ async def delete_workspace_file(doc_path: str, filename: str):
         raise HTTPException(404, f"File '{filename}' not found")
     target.unlink()
     return {"ok": True}
+
+
+# ── Import custom CV (paste .tex + .cls + extra files) ────────────────────────
+
+from datetime import datetime, timezone as dt_timezone
+
+
+class ImportCustomBody(BaseModel):
+    name: str
+    tex_content: str
+    cls_content: str = ""
+    cls_filename: str = "custom.cls"
+    extra_files: list[dict] = []
+
+
+_ALLOWED_IMPORT_EXTS = {".tex", ".cls", ".sty", ".bst", ".bib", ".lua", ".cfg", ".def", ".fd", ".clo"}
+
+
+@app.post("/api/docs/import-custom")
+async def import_custom_cv(body: ImportCustomBody):
+    name = body.name.strip().replace(" ", "_").lower()[:80]
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise HTTPException(400, f"Invalid document name: '{body.name}'")
+    tex_content = body.tex_content.strip()
+    if not tex_content:
+        raise HTTPException(400, "tex_content is required")
+
+    target_dir = docs.WORKSPACE / name
+    if target_dir.exists():
+        raise HTTPException(409, f"Document '{name}' already exists")
+    target_dir.mkdir(parents=True)
+
+    (target_dir / "main.tex").write_text(tex_content, encoding="utf-8")
+
+    if body.cls_content.strip():
+        cls_fn = (body.cls_filename or "custom.cls").strip().replace("\\", "/").split("/")[-1]
+        if not cls_fn.startswith(".") and not ".." in cls_fn and Path(cls_fn).suffix.lower() in _ALLOWED_IMPORT_EXTS:
+            (target_dir / cls_fn).write_text(body.cls_content.strip(), encoding="utf-8")
+
+    for ef in body.extra_files:
+        fn = (ef.get("name") or "").strip().replace("\\", "/").split("/")[-1]
+        fc = (ef.get("content") or "").strip()
+        if not fn or fn.startswith(".") or ".." in fn:
+            continue
+        if Path(fn).suffix.lower() not in _ALLOWED_IMPORT_EXTS:
+            continue
+        (target_dir / fn).write_text(fc, encoding="utf-8")
+
+    manifest = {
+        "schema": 1,
+        "created_utc": datetime.now(dt_timezone.utc).isoformat().replace("+00:00", "Z"),
+        "origin": "import",
+        "kind": "cv",
+        "template_id": "import-custom",
+        "language": "en",
+        "translated": False,
+        "company": "",
+        "role": "",
+        "channel": "",
+    }
+    (target_dir / "document.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    return {
+        "created": True,
+        "document": {
+            "path": str(target_dir.relative_to(docs.WORKSPACE)).replace("\\", "/"),
+            "name": name.replace("_", " ").title(),
+            "kind": "cv",
+            "has_tex": True,
+        },
+    }
 
 
 # ── Document deletion ─────────────────────────────────────────────────────────

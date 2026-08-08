@@ -27,7 +27,6 @@ let savedScrollTop  = 0;
 let savedScrollLeft = 0;
 let cmView        = null;          // CodeMirror EditorView instance
 let sidebarVisible = true;
-let templatesCache = [];    // cached template list for renderDocList
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -170,36 +169,6 @@ async function loadDocList() {
   }
 }
 
-async function loadTemplateList() {
-  try {
-    const data = await fetchJSON("/api/templates");
-    templatesCache = data.templates || [];
-  } catch (_) {}
-}
-
-function renderTemplateSection() {
-  const available = templatesCache.filter(t => t.has_template);
-  if (!available.length) return "";
-
-  let html = "";
-  for (const t of available) {
-    const icon = t.icon || "📄";
-    const colour = t.colour || "var(--accent)";
-    const kind = t.kind || "cv";
-    html += `<div class="template-item" data-tpl-id="${escapeHTML(t.id)}" data-tpl-kind="${kind}">
-      <span class="template-icon" style="color:${colour}">${escapeHTML(icon)}</span>
-      <span class="template-name">${escapeHTML(t.name)}</span>
-    </div>`;
-  }
-  return `<div class="doc-section">
-    <div class="doc-section-header">📋 Templates <span class="doc-section-count">${available.length}</span></div>
-    ${html}
-    <div class="template-item" id="tmpl-import-link" style="font-size:10px;color:var(--text-dim);padding-left:10px">
-      <span>+ Import .tex template…</span>
-    </div>
-  </div>`;
-}
-
 async function newFromTemplate(tplId, kind) {
   const base = kind === "letter" ? "new-letter" : "new-cv";
   const name = prompt(`Name for this ${kind === "letter" ? "letter" : "CV"}? (e.g. my-app)`, base);
@@ -222,7 +191,7 @@ async function newFromTemplate(tplId, kind) {
 
 function renderDocList(docs) {
   if (!docs) return;
-  if (!docs.length && !templatesCache.length) {
+  if (!docs.length) {
     docList.innerHTML = '<div class="sidebar-empty">No documents yet.</div>';
     return;
   }
@@ -235,16 +204,39 @@ function renderDocList(docs) {
   const _del = d => d.path === "cv" ? "" :
     `<button class="doc-delete" data-del="${escapeHTML(d.path)}" title="Delete ${escapeHTML(d.name)}">×</button>`;
 
+  // Derive a compact role hint: strip company slug prefix and number suffix from doc name
+  const _roleHint = d => {
+    if (!d.company) return d.name;
+    // Name format is "Tailored Company-Name-Role-Title-12" or "Cv Company-Name-..."
+    // Strip leading "Cv " or "Tailored " prefix (space-separated, case-insensitive)
+    let hint = d.name.replace(/^(cv|tailored)\s+/i, "");
+    // Strip the company name slug (hyphens) from the front
+    const companySlug = d.company.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    hint = hint.replace(new RegExp(`^${companySlug}[-\\s]?`, "i"), "");
+    // Keep trailing number suffix for disambiguation (e.g. -12 → " ·12")
+    hint = hint.replace(/-(\d+)$/, " ·$1").replace(/-/g, " ").trim();
+    return hint || d.name;
+  };
+
   const _row = d => {
     const active = currentDoc && currentDoc.path === d.path ? " active" : "";
-    const meta = d.company ? ` · ${escapeHTML(d.company)}` : "";
     let langBadge = "";
     if (d.language && d.language !== "en") {
       langBadge = `<span class="doc-lang">${escapeHTML(d.language.toUpperCase())}</span>`;
     }
-    return `<div class="doc-item${active}" data-path="${escapeHTML(d.path)}" data-kind="${d.kind}">
+    // For documents with a company, show company prominently + role hint below
+    let nameHtml;
+    if (d.company) {
+      nameHtml = `<span class="doc-name-wrap">
+        <span class="doc-primary">${escapeHTML(d.company)}</span>
+        <span class="doc-secondary">${escapeHTML(_roleHint(d))}</span>
+      </span>`;
+    } else {
+      nameHtml = `<span class="doc-name">${escapeHTML(d.name)}</span>`;
+    }
+    return `<div class="doc-item${active}" data-path="${escapeHTML(d.path)}" data-kind="${d.kind}" title="${escapeHTML(d.name)}">
       <span class="doc-icon">${_icon(d)}</span>
-      <span class="doc-name">${escapeHTML(d.name)}${meta}</span>
+      ${nameHtml}
       ${langBadge}
       ${_del(d)}
     </div>`;
@@ -271,9 +263,6 @@ function renderDocList(docs) {
   let html = _section("cover-letters", "✉️ Cover Letters", letters) +
              _section("custom-cvs", "📂 Custom CVs", manualCVs) +
              _section("generated-cvs", "🤖 Generated CVs", generatedCVs);
-
-  // Append templates section inside doc-list
-  html += renderTemplateSection();
 
   // Fact Bank entry
   const factsActive = currentDoc && currentDoc.path === "facts" ? " active" : "";
@@ -307,19 +296,26 @@ function renderDocList(docs) {
       deleteDocument(btn.dataset.del, btn);
     });
   });
+}
 
-  // Template item click handlers
-  docList.querySelectorAll(".template-item").forEach(el => {
-    el.addEventListener("click", () => {
-      if (el.dataset.tplId) newFromTemplate(el.dataset.tplId, el.dataset.tplKind);
+// ── Sidebar search filter ─────────────────────────────────────────────────────
+const sidebarSearch = document.getElementById("sidebar-search");
+if (sidebarSearch) {
+  sidebarSearch.addEventListener("input", () => {
+    const q = sidebarSearch.value.toLowerCase().trim();
+    docList.querySelectorAll(".doc-item").forEach(el => {
+      const text = (el.title + " " + el.textContent).toLowerCase();
+      el.style.display = (!q || text.includes(q)) ? "" : "none";
+    });
+    // Auto-expand sections that have a match when filtering
+    docList.querySelectorAll(".doc-section").forEach(sec => {
+      if (!q) return;
+      const body = sec.querySelector(".doc-section-body");
+      if (!body) return;
+      const hasVisible = [...body.querySelectorAll(".doc-item")].some(el => el.style.display !== "none");
+      if (hasVisible) body.classList.remove("collapsed");
     });
   });
-
-  // Import template link
-  const importLink = docList.querySelector("#tmpl-import-link");
-  if (importLink) {
-    importLink.addEventListener("click", () => { showMapTemplatePanel(); });
-  }
 }
 
 async function deleteDocument(path, btn) {
@@ -814,15 +810,34 @@ handle.addEventListener("mousedown", (e) => {
   document.addEventListener("mouseup", onUp);
 });
 
-// ── Modal: Template picker & new document ─────────────────────────────────────
+// ── New document dropdown ─────────────────────────────────────────────────────
 
-let modalMode = "create"; // "create" | "import"
+const btnNewDoc = $("btn-new-doc");
+const newDocMenu = document.getElementById("new-doc-menu");
 
-$("btn-new-doc").addEventListener("click", async () => {
-  modalMode = "create";
-  openModal();
-  await loadTemplateGrid();
+btnNewDoc.addEventListener("click", (e) => {
+  e.stopPropagation();
+  newDocMenu.classList.toggle("hidden");
 });
+
+document.addEventListener("click", (e) => {
+  if (!btnNewDoc.contains(e.target) && !newDocMenu.contains(e.target)) {
+    newDocMenu.classList.add("hidden");
+  }
+});
+
+newDocMenu.querySelectorAll(".nd-item").forEach(item => {
+  item.addEventListener("click", () => {
+    newDocMenu.classList.add("hidden");
+    const action = item.dataset.action;
+    if (action === "letter") newFromTemplate("scrlttr2-letter", "letter");
+    else if (action === "ats") newFromTemplate("ats-cv", "cv");
+    else if (action === "designed") newFromTemplate("designed-cv", "cv");
+    else if (action === "import") showImportCustomPanel();
+  });
+});
+
+let modalMode = "create"; // "create" | "import" | "import-custom"
 
 $("btn-import").addEventListener("click", async () => {
   modalMode = "import";
@@ -834,15 +849,18 @@ function openModal() {
   modalOverlay.classList.remove("hidden");
   modalError.classList.add("hidden");
   modalCreate.disabled = true;
-  newDocName.value = "";
-  templateGrid.classList.remove("hidden");
-  importPanel.classList.add("hidden");
-  modalImportBtn.classList.add("hidden");
   modalCreate.classList.remove("hidden");
+  newDocName.value = "";
   newDocName.style.display = "";
+  templateGrid.classList.add("hidden");
+  importPanel.classList.add("hidden");
+  importCustomPanel.classList.add("hidden");
+  modalImportBtn.classList.add("hidden");
   document.querySelector("#modal-footer label").style.display = "";
-  document.querySelector("#modal-header span").textContent = modalMode === "import" ? "Import Work History" : "New Document — Choose Template";
 }
+
+$("modal-close").addEventListener("click", () => { modalOverlay.classList.add("hidden"); });
+modalOverlay.addEventListener("click", (e) => { if (e.target === modalOverlay) modalOverlay.classList.add("hidden"); });
 
 function showImportPanel() {
   templateGrid.classList.add("hidden");
@@ -854,218 +872,88 @@ function showImportPanel() {
   importTextarea.value = "";
   modalImportBtn.disabled = false;
   modalImportBtn.textContent = "Import & Merge";
+  document.querySelector("#modal-header span").textContent = "Import Work History";
 }
 
-async function loadTemplateGrid() {
-  try {
-    const resp = await fetch("/api/templates");
-    const data = await resp.json();
-    renderTemplateGrid(data.templates);
-  } catch {
-    templateGrid.innerHTML = '<p style="color:var(--error);padding:16px">Could not load templates.</p>';
-  }
-}
-
-$("modal-close").addEventListener("click", () => {
-  modalOverlay.classList.add("hidden");
-});
-
-modalOverlay.addEventListener("click", (e) => {
-  if (e.target === modalOverlay) modalOverlay.classList.add("hidden");
-});
-
-function renderTemplateGrid(templates) {
-  if (!templates.length) {
-    templateGrid.innerHTML = '<p class="grid-empty">No templates available.</p>';
-    return;
-  }
-  templateGrid.innerHTML = templates.map(t => `
-    <div class="tpl-card" data-id="${t.id}" data-kind="${t.kind}">
-      <div class="tpl-icon" style="background:${t.colour || 'var(--accent)'}">${t.icon || '📄'}</div>
-      <div class="tpl-name">${t.name}</div>
-      <div class="tpl-desc">${t.description}</div>
-      <div class="tpl-kind">${t.kind === 'letter' ? 'Cover Letter' : 'CV'}</div>
-    </div>
-  `).join("") + `
-    <div class="tpl-card" id="tpl-card-ai-map" style="border-style:dashed">
-      <div class="tpl-icon" style="background:var(--accent2)">🤖</div>
-      <div class="tpl-name">Create from .tex</div>
-      <div class="tpl-desc">Paste any LaTeX CV template you found online. The AI reads its macros and maps them to your fact bank.</div>
-      <div class="tpl-kind">AI Mapper</div>
-    </div>
-  `;
-
-  let selectedTemplate = null;
-  templateGrid.querySelectorAll(".tpl-card").forEach(card => {
-    card.addEventListener("click", () => {
-      if (card.id === "tpl-card-ai-map") {
-        showMapTemplatePanel();
-        return;
-      }
-      templateGrid.querySelectorAll(".tpl-card").forEach(c => c.classList.remove("selected"));
-      card.classList.add("selected");
-      selectedTemplate = card.dataset.id;
-      modalCreate.disabled = !newDocName.value.trim();
-    });
-  });
-
-  newDocName.oninput = () => {
-    modalCreate.disabled = !selectedTemplate || !newDocName.value.trim();
-    modalError.classList.add("hidden");
-  };
-}
-
-// ── AI Template Mapping ───────────────────────────────────────────────────────
-
-function showMapTemplatePanel() {
-  templateGrid.classList.add("hidden");
-  importPanel.classList.add("hidden");
-  const mapPanel = document.getElementById("map-template-panel");
-  if (mapPanel) mapPanel.classList.remove("hidden");
+function showImportCustomPanel() {
+  modalMode = "import-custom";
+  openModal();
   modalCreate.classList.add("hidden");
-  newDocName.style.display = "none";
-  document.querySelector("#modal-footer label").style.display = "none";
-  document.querySelector("#modal-header span").textContent = "AI Template Mapper — Create from .tex";
+  importCustomPanel.classList.remove("hidden");
+  importTex.value = "";
+  importCls.value = "";
+  importExtraFiles.innerHTML = "";
+  importCustomStatus.innerHTML = "";
+  newDocName.style.display = "";
+  document.querySelector("#modal-footer label").style.display = "";
+  modalCreate.classList.remove("hidden");
+  modalCreate.disabled = false;
+  modalCreate.textContent = "Create";
+  document.querySelector("#modal-header span").textContent = "Import Custom CV";
 }
 
-document.getElementById("btn-map-template").addEventListener("click", mapTemplate);
+// ── Import Custom CV — add extra file rows ─────────────────────────────────────
+const importTex = $("import-tex");
+const importCls = $("import-cls");
+const importExtraFiles = $("import-extra-files");
+const importCustomPanel = $("import-custom-panel");
+const importCustomStatus = $("import-custom-status");
+const btnAddExtraFile = $("btn-add-extra-file");
 
-async function mapTemplate() {
-  const texContent = document.getElementById("map-tex-textarea").value.trim();
-  const templateName = document.getElementById("map-template-name").value.trim();
-  const layout = document.getElementById("map-template-layout").value;
-  const statusEl = document.getElementById("map-template-status");
-  const resultEl = document.getElementById("map-template-result");
-  const btn = document.getElementById("btn-map-template");
+btnAddExtraFile.addEventListener("click", () => {
+  const row = document.createElement("div");
+  row.className = "import-extra-row";
+  row.innerHTML = `
+    <input type="text" class="import-extra-name" placeholder="filename (e.g. mystyle.sty)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--text);font-size:11px;font-family:'Cascadia Code',monospace">
+    <button class="import-extra-rem" title="Remove">×</button>
+    <textarea class="import-extra-content" placeholder="Paste file content..." style="width:100%;min-height:60px;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px;color:var(--text);font-size:11px;font-family:'Cascadia Code',monospace;line-height:1.4;margin-top:4px"></textarea>`;
+  row.querySelector(".import-extra-rem").addEventListener("click", () => row.remove());
+  importExtraFiles.appendChild(row);
+});
 
-  if (!texContent || texContent.length < 200) {
-    statusEl.innerHTML = '<span style="color:var(--error)">Paste the full .tex template (at least 200 characters).</span>';
-    return;
-  }
-  if (!templateName) {
-    statusEl.innerHTML = '<span style="color:var(--error)">Enter a name for the new template.</span>';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "Analysing…";
-  statusEl.innerHTML = '<span class="spinner"></span> AI is reading the template and mapping to your data…';
-  resultEl.innerHTML = "";
-
-  try {
-    const resp = await fetch("/api/content/map-template", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        raw_tex: texContent,
-        template_name: templateName,
-        layout: layout,
-      }),
-    });
-
-    if (!resp.ok) {
-      const msg = await resp.text();
-      throw new Error(msg || `HTTP ${resp.status}`);
-    }
-
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let doneData = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.token) {
-              statusEl.textContent += data.token;
-            }
-            if (data.step && data.message) {
-              statusEl.innerHTML = `<span class="spinner"></span> ${data.message}`;
-            }
-            if (event?.type === "done" || (typeof data.success !== "undefined" && data.template_id)) {
-              doneData = data;
-            }
-          } catch (_) {}
-        }
-      }
-    }
-
-    // Wait for done event from the stream
-    if (!doneData) {
-      // Try direct parsing of last event
-      statusEl.innerHTML = '<span style="color:var(--warn)">Could not determine result — check the Templates list.</span>';
-      btn.disabled = false;
-      btn.textContent = "Analyse Template";
-      return;
-    }
-
-    if (doneData.success) {
-      statusEl.innerHTML = '<span class="apply-ok">✓ Adapter created and validated against your fact bank!</span>';
-      resultEl.innerHTML = `
-        <div style="margin-top:10px;padding:10px;background:var(--surface2);border-radius:6px;font-size:12px">
-          <b>Template:</b> ${doneData.template_id} (${doneData.rendered_lines} lines rendered)<br>
-          <b>Warnings:</b> ${(doneData.guard_warnings || []).length || "none"}<br>
-          <button class="btn-ghost" style="margin-top:6px" onclick="document.getElementById('modal-overlay').classList.add('hidden');loadDocList()">Close & refresh</button>
-        </div>`;
-      // Reload template grid
-      setTimeout(() => loadTemplateGrid(), 1000);
-    } else {
-      statusEl.innerHTML = '<span class="apply-err">Adapter has guard errors — review below</span>';
-      const errs = (doneData.guard_errors || []).map(e =>
-        `<span style="color:var(--error)">R${e.rule}: ${e.message}</span>`
-      ).join("<br>");
-      resultEl.innerHTML = `<div style="margin-top:10px;padding:10px;background:rgba(243,139,168,0.1);border-radius:6px;font-size:12px">${errs}</div>`;
-    }
-  } catch (e) {
-    statusEl.innerHTML = `<span class="apply-err">${e.message || "Mapping failed"}</span>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Analyse Template";
-  }
-}
-
+// ── Modal: Create (import custom CV) ───────────────────────────────────────────
 modalCreate.addEventListener("click", async () => {
-  const selected = templateGrid.querySelector(".tpl-card.selected");
-  if (!selected) return;
-
-  const templateId = selected.dataset.id;
+  if (modalMode !== "import-custom") return;
   const name = newDocName.value.trim().replace(/\s+/g, "_").toLowerCase();
-  if (!name) return;
+  if (!name) { modalError.textContent = "Enter a document name."; modalError.classList.remove("hidden"); return; }
+
+  const texContent = importTex.value.trim();
+  if (!texContent) { modalError.textContent = "Paste the .tex file content."; modalError.classList.remove("hidden"); return; }
 
   modalCreate.disabled = true;
   modalCreate.textContent = "Creating…";
+  modalError.classList.add("hidden");
+
+  const extraFiles = [];
+  importExtraFiles.querySelectorAll(".import-extra-row").forEach(row => {
+    const fn = row.querySelector(".import-extra-name").value.trim();
+    const fc = row.querySelector(".import-extra-content").value.trim();
+    if (fn && fc) extraFiles.push({ name: fn, content: fc });
+  });
 
   try {
-    const resp = await fetch(`/api/templates/${templateId}/create`, {
+    const resp = await fetch("/api/docs/import-custom", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ template_id: templateId, name }),
+      body: JSON.stringify({
+        name,
+        tex_content: texContent,
+        cls_content: importCls.value.trim(),
+        cls_filename: "custom.cls",
+        extra_files: extraFiles,
+      }),
     });
-
     if (!resp.ok) {
-      const err = await resp.text();
-      modalError.textContent = err;
-      modalError.classList.remove("hidden");
-      modalCreate.textContent = "Create";
-      modalCreate.disabled = false;
-      return;
+      const err = await resp.json();
+      throw new Error(err.detail || `HTTP ${resp.status}`);
     }
-
     const data = await resp.json();
-    const doc = data.document;
     modalOverlay.classList.add("hidden");
     modalCreate.textContent = "Create";
     await loadDocList();
-    await switchDocument(doc.path, doc.kind);
+    await switchDocument(data.document.path, data.document.kind);
   } catch (e) {
-    modalError.textContent = "Network error. Try again.";
+    modalError.textContent = e.message || "Network error. Try again.";
     modalError.classList.remove("hidden");
     modalCreate.textContent = "Create";
     modalCreate.disabled = false;
@@ -1135,10 +1023,36 @@ async function loadChatModels() {
   try {
     const resp = await fetch(`/api/chat/models?provider=${provider}`);
     const data = await resp.json();
-    for (const m of data.models || []) {
-      chatModel.innerHTML += `<option value="${m.id}">${m.name}</option>`;
-    }
+    _populateModelSelect(chatModel, data.models || []);
   } catch (_) {}
+}
+
+function _populateModelSelect($select, models) {
+  const free = models.filter(m => m.free);
+  const paid = models.filter(m => !m.free);
+  let html = $select.innerHTML; // keep placeholder option
+  if (free.length) {
+    html += '<optgroup label="Free">';
+    for (const m of free) {
+      html += `<option value="${escapeHTML(m.id)}">${escapeHTML(m.name)} (free)</option>`;
+    }
+    html += '</optgroup>';
+  }
+  if (paid.length) {
+    html += '<optgroup label="Paid">';
+    for (const m of paid) {
+      html += `<option value="${escapeHTML(m.id)}">${escapeHTML(m.name)}</option>`;
+    }
+    html += '</optgroup>';
+  }
+  if (!free.length && !paid.length) {
+    for (const m of models) {
+      const id = typeof m === "string" ? m : m.id;
+      const name = typeof m === "string" ? m : m.name;
+      html += `<option value="${escapeHTML(id)}">${escapeHTML(name)}</option>`;
+    }
+  }
+  $select.innerHTML = html;
 }
 
 // ── Apply view: the job-search workflow ───────────────────────────────────────
@@ -1183,9 +1097,7 @@ async function loadApplyModels() {
   try {
     const resp = await fetch(`/api/chat/models?provider=${applyProvider.value}`);
     const data = await resp.json();
-    for (const m of data.models || []) {
-      applyModel.innerHTML += `<option value="${m.id}">${m.name}</option>`;
-    }
+    _populateModelSelect(applyModel, data.models || []);
   } catch (_) {}
 }
 loadApplyModels();
@@ -1193,7 +1105,8 @@ loadApplyModels();
 async function loadTemplates() {
   try {
     const data = await fetchJSON("/api/templates");
-    const cvs = (data.templates || []).filter(t => t.kind === "cv" && t.has_template);
+    const ALLOWED_CV = new Set(["ats-cv", "designed-cv"]);
+    const cvs = (data.templates || []).filter(t => t.kind === "cv" && t.has_template && ALLOWED_CV.has(t.id));
     const letters = (data.templates || []).filter(t => t.kind === "letter" && t.has_template);
     populateSelect(optCvTemplate, cvs, t => t.id, t => t.name);
     if (letters.length > 0) {
@@ -1214,6 +1127,164 @@ async function loadLanguages() {
 loadTemplates();
 loadLanguages();
 
+// ── API Key management ────────────────────────────────────────────────────────
+const _APIKEY_PROVIDERS = [
+  { id: "deepseek",   label: "DeepSeek",    placeholder: "sk-...",            link: "https://platform.deepseek.com",     pw: true },
+  { id: "nvidia",     label: "NVIDIA",      placeholder: "nvapi-...",         link: "https://build.nvidia.com",          pw: true },
+  { id: "openrouter", label: "OpenRouter",  placeholder: "sk-or-...",         link: "https://openrouter.ai/keys",        pw: true },
+  { id: "ollama_url", label: "Ollama URL",  placeholder: "http://localhost:11434/v1", link: "", pw: false },
+];
+
+function _renderApiKeyPanel() {
+  let html = "";
+  for (const p of _APIKEY_PROVIDERS) {
+    const linkHtml = p.link ? `<a href="${p.link}" target="_blank" class="apikey-link">get key ↗</a>` : "";
+    html += `<div class="apikey-row" data-provider="${p.id}">
+      <label>${p.label} ${linkHtml}</label>
+      <input type="${p.pw ? 'password' : 'text'}" class="apikey-input" placeholder="${p.placeholder}" autocomplete="off">
+      <button class="apikey-save btn-ghost">Save</button>
+    </div>`;
+  }
+  const panelApply = $("api-key-panel-apply");
+  const panelChat = $("api-key-panel-chat");
+  if (panelApply) panelApply.innerHTML = html;
+  if (panelChat) panelChat.innerHTML = html;
+
+  // Wire save buttons in both panels
+  document.querySelectorAll(".apikey-save").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = btn.closest(".apikey-row");
+      const input = row.querySelector(".apikey-input");
+      const provider = row.dataset.provider;
+      const value = input.value.trim();
+      btn.textContent = "…";
+      try {
+        const resp = await fetch("/api/settings/apikey", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, value }),
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+        btn.classList.add("saved");
+        btn.textContent = "Saved ✓";
+        setTimeout(() => { btn.classList.remove("saved"); btn.textContent = "Save"; }, 2000);
+      } catch (e) {
+        btn.textContent = "Error";
+        setTimeout(() => { btn.textContent = "Save"; }, 2000);
+      }
+    });
+  });
+}
+_renderApiKeyPanel();
+
+// ── Settings Modal ────────────────────────────────────────────────────────────
+const settingsOverlay = $("settings-overlay");
+const settingsProvider = $("settings-provider");
+const settingsModel   = $("settings-model");
+const settingsHint    = $("settings-provider-hint");
+
+const PROVIDER_HINTS = {
+  deepseek:   "Requires a DeepSeek API key. Fast & affordable.",
+  nvidia:     "NVIDIA NIM offers free-tier models — get a free API key at build.nvidia.com.",
+  openrouter: "OpenRouter aggregates many models. Free-tier models marked (free). Get a key at openrouter.ai.",
+  ollama:     "Runs locally — no API key needed. Set the Ollama URL below.",
+};
+
+async function _loadSettingsModels() {
+  if (!settingsProvider) return;
+  settingsModel.innerHTML = '<option value="">Auto (provider default)</option>';
+  try {
+    const resp = await fetch(`/api/chat/models?provider=${settingsProvider.value}`);
+    const data = await resp.json();
+    _populateModelSelect(settingsModel, data.models || []);
+  } catch (_) {}
+  if (settingsHint) settingsHint.textContent = PROVIDER_HINTS[settingsProvider.value] || "";
+}
+
+function openSettingsModal() {
+  // Sync modal selects with current apply/chat values
+  if (settingsProvider && applyProvider) settingsProvider.value = applyProvider.value;
+  _loadSettingsModels().then(() => {
+    if (settingsModel && applyModel) {
+      const cur = applyModel.value;
+      if (cur && [...settingsModel.options].some(o => o.value === cur)) settingsModel.value = cur;
+    }
+  });
+  _renderSettingsApiKeys();
+  settingsOverlay.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closeSettingsModal() {
+  settingsOverlay.classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+function _renderSettingsApiKeys() {
+  const panel = $("settings-apikey-panel");
+  if (!panel) return;
+  let html = "";
+  for (const p of _APIKEY_PROVIDERS) {
+    const linkHtml = p.link ? `<a href="${p.link}" target="_blank" class="apikey-link">get key ↗</a>` : "";
+    html += `<div class="apikey-row" data-provider="${p.id}">
+      <label class="settings-label">${p.label} ${linkHtml}</label>
+      <input type="${p.pw ? 'password' : 'text'}" class="apikey-input" placeholder="${p.placeholder}" autocomplete="off">
+      <button class="apikey-save btn-ghost">Save</button>
+      <span class="apikey-status"></span>
+    </div>`;
+  }
+  panel.innerHTML = html;
+  panel.querySelectorAll(".apikey-save").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const row = btn.closest(".apikey-row");
+      const input = row.querySelector(".apikey-input");
+      const status = row.querySelector(".apikey-status");
+      const provider = row.dataset.provider;
+      const value = input.value.trim();
+      if (!value) { status.textContent = "Enter a value first"; return; }
+      btn.textContent = "…";
+      try {
+        const resp = await fetch("/api/settings/apikey", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, value }),
+        });
+        if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+        btn.textContent = "Save";
+        status.textContent = "Saved ✓";
+        status.style.color = "var(--accent)";
+        setTimeout(() => { status.textContent = ""; }, 2500);
+        input.value = "";
+      } catch (e) {
+        btn.textContent = "Save";
+        status.textContent = "Error: " + e.message;
+        status.style.color = "var(--error)";
+      }
+    });
+  });
+}
+
+settingsProvider?.addEventListener("change", _loadSettingsModels);
+
+$("settings-close")?.addEventListener("click", closeSettingsModal);
+$("settings-cancel")?.addEventListener("click", closeSettingsModal);
+settingsOverlay?.addEventListener("click", e => { if (e.target === settingsOverlay) closeSettingsModal(); });
+
+$("settings-apply")?.addEventListener("click", () => {
+  const prov = settingsProvider?.value;
+  const mod  = settingsModel?.value;
+  if (prov) {
+    if (applyProvider) { applyProvider.value = prov; loadApplyModels().then(() => { if (mod && applyModel) applyModel.value = mod; }); }
+    if (chatProvider)  { chatProvider.value  = prov; loadChatModels().then(() => { if (mod && chatModel) chatModel.value = mod; }); }
+  }
+  closeSettingsModal();
+});
+
+// Wire all ⚙ buttons to open settings modal
+btnApplySettings?.addEventListener("click", openSettingsModal);
+$("btn-settings")?.addEventListener("click", openSettingsModal);
+$("btn-settings-chat")?.addEventListener("click", openSettingsModal);
+
 // Clear cached translations when language changes so generate re-translates.
 optLanguage.addEventListener("change", () => {
   if (tailorResultData) {
@@ -1222,7 +1293,6 @@ optLanguage.addEventListener("change", () => {
 });
 
 btnApplyReset.addEventListener("click", resetApplyFlow);
-btnApplySettings.addEventListener("click", () => applySettingsPanel.classList.toggle("hidden"));
 
 function resetApplyFlow() {
   cancelPrefetch();
@@ -1888,7 +1958,7 @@ document.getElementById("fm-upload-input")?.addEventListener("change", async (e)
   e.target.value = "";
 });
 
-document.getElementById("fm-import-template")?.addEventListener("click", () => { showMapTemplatePanel(); });
+document.getElementById("fm-import-template")?.addEventListener("click", () => { showImportCustomPanel(); });
 
 // ── Sidebar resize handle ─────────────────────────────────────────────────────
 (function initSidebarResize() {
@@ -2243,7 +2313,6 @@ btnNewProfile.addEventListener("click", async () => {
 
 (async function init() {
   await loadProfiles();
-  loadTemplateList();
   await loadDocList();
   try {
     const resp = await fetch("/api/docs");

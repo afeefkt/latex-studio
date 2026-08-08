@@ -29,6 +29,7 @@ a = Analysis(
         "app.llm.deepseek",
         "app.llm.nvidia",
         "app.llm.ollama",
+        "app.llm.openrouter",
         "pydantic",
         "pydantic_core",
         "yaml",

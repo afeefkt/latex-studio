@@ -27,18 +27,25 @@ class OpenAICompatProvider(LLMProvider):
     def __init__(self, model: str | None = None):
         self._override_model = model
         api_key = self._get_api_key()
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        extra = self._extra_headers()
+        if extra:
+            headers.update(extra)
         self._client = httpx.AsyncClient(
             base_url=self.base_url.rstrip("/"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=120.0,
             verify=_ssl_ctx,
         )
 
     def _get_api_key(self) -> str:
         raise NotImplementedError
+
+    def _extra_headers(self) -> dict:
+        return {}  # override in subclasses to add custom headers
 
     @property
     def model_name(self) -> str:

@@ -29,6 +29,7 @@
       <span id="status-badge" class="badge idle">Idle</span>
       <button id="btn-compile" title="Compile (Ctrl+Enter)">▶ Compile</button>
       <a id="btn-download" href="#" download class="btn-link" style="display:none">⬇ Download PDF</a>
+      <button id="btn-settings" title="Settings">⚙ Settings</button>
     </div>
   </header>
 
@@ -59,7 +60,8 @@
           <label>Provider
             <select id="apply-provider">
               <option value="deepseek">DeepSeek</option>
-              <option value="nvidia">NVIDIA</option>
+              <option value="nvidia">NVIDIA NIM (free)</option>
+              <option value="openrouter">OpenRouter</option>
               <option value="ollama">Ollama (offline)</option>
             </select>
           </label>
@@ -101,9 +103,7 @@
             <label class="gen-opt-label" for="opt-cv-template">CV layout</label>
             <select id="opt-cv-template">
               <option value="ats-cv">ATS CV</option>
-              <option value="optimized-cv">Optimised CV</option>
               <option value="designed-cv">Designed CV</option>
-              <option value="modern-cv">Modern CV</option>
             </select>
           </div>
 
@@ -147,7 +147,19 @@
       <div id="sidebar-resize-handle"></div>
       <div id="sidebar-header">
         <span>Documents</span>
-        <button id="btn-new-doc" title="New document from template">+ New</button>
+        <div class="new-doc-wrap">
+          <button id="btn-new-doc" title="New document">+ New ▾</button>
+          <div id="new-doc-menu" class="hidden">
+            <button class="nd-item" data-action="letter">✉️ New Cover Letter</button>
+            <button class="nd-item" data-action="ats">📄 New CV (ATS)</button>
+            <button class="nd-item" data-action="designed">🎨 New CV (Designed)</button>
+            <div class="nd-sep"></div>
+            <button class="nd-item" data-action="import">📥 Import Custom CV…</button>
+          </div>
+        </div>
+      </div>
+      <div id="sidebar-search-wrap">
+        <input id="sidebar-search" type="search" placeholder="Filter documents…" autocomplete="off">
       </div>
       <nav id="doc-list">
         <div class="sidebar-empty">Loading…</div>
@@ -177,11 +189,13 @@
               <select id="chat-provider">
                 <option value="deepseek">DeepSeek</option>
                 <option value="nvidia">NVIDIA</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="ollama">Ollama</option>
               </select>
               <select id="chat-model">
                 <option value="">Auto</option>
               </select>
+              <button id="btn-settings-chat" title="AI Settings">⚙</button>
               <button id="btn-chat-clear" title="Clear chat">✕</button>
             </div>
           </div>
@@ -199,7 +213,7 @@
               <label class="btn-ghost fm-upload-label">↑ Upload file
                 <input type="file" id="fm-upload-input" accept="image/*,.pdf,.cls,.sty,.bst,.bib,.lua,.fd,.def,.lco" hidden>
               </label>
-              <button id="fm-import-template" class="btn-ghost">+ Import .tex template</button>
+              <button id="fm-import-template" class="btn-ghost">+ Import Custom CV</button>
             </div>
             <div id="fm-status"></div>
           </div>
@@ -242,20 +256,14 @@
       <div id="import-panel" class="hidden">
         <textarea id="import-textarea" placeholder="Paste your work history text here...&#10;&#10;Example:&#10;Embedded SW Development Engineer at KooSys GmbH, Regensburg (Sep 2024 - Present)&#10;- Developed MBD-based FOC algorithms...&#10;- Built 6-phase IPMSM Plant Model...&#10;Tools: MATLAB/Simulink, Embedded Coder, CANoe"></textarea>
       </div>
-      <!-- AI template mapping panel -->
-      <div id="map-template-panel" class="hidden">
-        <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Paste a LaTeX CV template you found online. The AI will read its macros and produce a Jinja adapter that renders from your fact bank.</p>
-        <textarea id="map-tex-textarea" placeholder="Paste the full .tex file here..." style="width:100%;min-height:180px;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:12px;color:var(--text);font-size:12px;font-family:'Cascadia Code',monospace;line-height:1.4"></textarea>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
-          <input id="map-template-name" type="text" placeholder="Template name (e.g. alta-cv)" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:6px 10px;color:var(--text);font-size:12px;font-family:'Cascadia Code',monospace" />
-          <select id="map-template-layout" style="background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:6px 10px;font-size:12px">
-            <option value="designed">Designed layout</option>
-            <option value="ats">ATS-safe layout</option>
-          </select>
-          <button id="btn-map-template" class="btn-primary" style="padding:6px 14px;font-size:12px">Analyse Template</button>
-        </div>
-        <div id="map-template-status" style="margin-top:8px;font-size:12px"></div>
-        <div id="map-template-result" style="margin-top:8px"></div>
+      <!-- Import Custom CV panel -->
+      <div id="import-custom-panel" class="hidden">
+        <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Paste your LaTeX CV source. The .tex is required; add a .cls or other files if your template needs them.</p>
+        <textarea id="import-tex" placeholder="Paste your .tex file here..." style="width:100%;min-height:180px;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:12px;color:var(--text);font-size:12px;font-family:'Cascadia Code',monospace;line-height:1.4"></textarea>
+        <textarea id="import-cls" placeholder="Paste .cls file here if needed..." style="width:100%;min-height:80px;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:12px;color:var(--text);font-size:12px;font-family:'Cascadia Code',monospace;line-height:1.4;margin-top:8px"></textarea>
+        <div id="import-extra-files"></div>
+        <button id="btn-add-extra-file" class="btn-ghost" style="margin-top:6px;font-size:11px">+ Add file (.sty, .bst, extra .tex)</button>
+        <div id="import-custom-status" style="margin-top:8px;font-size:12px"></div>
       </div>
       <div id="modal-footer">
         <label for="new-doc-name">Document name:</label>
@@ -274,6 +282,45 @@
       <button id="btn-close-apps">✕</button>
     </div>
     <div id="applications-list"></div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settings-overlay" class="hidden">
+    <div id="settings-modal">
+      <div id="settings-header">
+        <span>⚙ Settings</span>
+        <button id="settings-close">✕</button>
+      </div>
+      <div id="settings-body">
+        <div class="settings-section">
+          <div class="settings-section-title">AI Provider</div>
+          <div class="settings-row">
+            <label class="settings-label">Provider</label>
+            <select id="settings-provider" class="settings-select">
+              <option value="deepseek">DeepSeek</option>
+              <option value="nvidia">NVIDIA NIM (free tier)</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (offline / local)</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">Model</label>
+            <select id="settings-model" class="settings-select">
+              <option value="">Auto (provider default)</option>
+            </select>
+          </div>
+          <div class="settings-hint" id="settings-provider-hint"></div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">API Keys</div>
+          <div id="settings-apikey-panel"></div>
+        </div>
+      </div>
+      <div id="settings-footer">
+        <button id="settings-apply" class="btn-primary">Apply</button>
+        <button id="settings-cancel" class="btn-ghost">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- CodeMirror 6 (bundled ESM via jsDelivr) -->
